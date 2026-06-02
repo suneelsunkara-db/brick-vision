@@ -1,0 +1,81 @@
+schema_version: "1.0"
+id: "skill:migration.lakebridge-support-matrix"
+version: "0.1.0"
+exemplar_of: "meta:migration-assessment/ext:source-system-support-matrix"
+capability_links:
+  primary:
+    - "meta:migration-assessment/ext:source-system-support-matrix"
+  uses:
+    - "meta:migration-assessment"
+    - "meta:migration-analysis"
+    - "meta:migration-transpile"
+    - "meta:migration-validation"
+title: "Lakebridge source-system support matrix"
+description: |
+  Inspects the installed Lakebridge and Switch resources to report which source
+  systems are evidenced for assessment, SQL transpilation, code conversion, and
+  reconciliation. This is a knowledge/readiness skill: it does not run a
+  migration, and it must distinguish declared, prompt-level, installed, and
+  operational support.
+
+when_to_use:
+  - "Before building a Lakebridge assessment, transpile, code-convert, or reconcile skill"
+  - "When an agent needs to know whether a source system is supported by Lakebridge, Switch, Bladebridge, or Reconcile"
+  - "When Skill Builder needs a migration capability gap backed by package evidence"
+
+load_signal:
+  embed: "Lakebridge supported source systems analyzer transpiler reconcile Switch Bladebridge support matrix"
+  triggers:
+    - "lakebridge supported sources"
+    - "source systems support"
+    - "switch supported dialects"
+    - "bladebridge support"
+    - "reconcile supported systems"
+    - "migration support matrix"
+
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills: []
+  model_role: null
+  budget:
+    max_context_tokens: 8000
+    max_total_input_tokens: 12000
+    max_total_output_tokens: 4000
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+
+inputs:
+  - name: "lakebridge_env_path"
+    type: "string"
+    required: false
+    description: "Optional path to the isolated Lakebridge virtual environment or site-packages root"
+  - name: "source_system"
+    type: "string"
+    required: false
+    description: "Optional source-system filter, for example teradata, synapse, mssql, snowflake"
+
+outputs:
+  - name: "support_matrix"
+    type: "LakebridgeSupportMatrix"
+  - name: "recommended_skill_gaps"
+    type: "object[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  scorers:
+    - "SupportEvidenceCompleteness"
+
+constitutional:
+  - "support.must.be.evidence_backed"
+  - "prompt_presence.must.not_equal_operational_support"
+  - "unsupported.systems.must_be_reported_as_unknown_not_failed"
+
+execution:
+  runtime: "local_readonly"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-migration-lakebridge-support-matrix"

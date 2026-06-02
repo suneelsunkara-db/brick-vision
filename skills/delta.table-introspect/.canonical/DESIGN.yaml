@@ -1,0 +1,81 @@
+schema_version: "1.0"
+kind: "skill"
+id: "skill:delta.table-introspect"
+version: "0.1.0"
+title: "Introspect a Delta table's storage profile"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-table-introspect"
+
+exemplar_of: "meta:delta-lake/ext:introspect-table-metadata"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "mechanical_dag"
+  dag:
+    - id: "describe_extended"
+      tool: "tool:delta.describe_extended"
+      inputs:
+        table_fqn: "{target}"
+    - id: "describe_history"
+      tool: "tool:delta.describe_history"
+      inputs:
+        table_fqn: "{target}"
+    - id: "po_history"
+      tool: "tool:delta.predictive_optimization_history"
+      inputs:
+        table_fqn: "{target}"
+    - id: "build_claims"
+      kind: "pure_python"
+      function: "build_table_introspect_claims"
+      inputs:
+        described: "$describe_extended.result"
+        history: "$describe_history.results"
+        po: "$po_history.results"
+    - id: "emit_claims"
+      tool: "tool:kg.emit_claims"
+      inputs:
+        claims: "$build_claims.claims"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on {target.catalog}"
+    - "USE SCHEMA on {target.schema}"
+    - "SELECT on {target.table}"
+  system_schemas:
+    - "system.storage"
+  tools:
+    - "tool:delta.describe_extended"
+    - "tool:delta.describe_history"
+    - "tool:delta.predictive_optimization_history"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null
+  budget:
+    max_tool_calls: 20
+    max_wallclock_sec: 60
+  constitutional:
+    - "no.write.to.uc"
+    - "no.cross.workspace.read"
+
+inputs:
+  - name: "target"
+    type: "string"
+    required: true
+    description: "FQN of the Delta table to introspect"
+
+outputs:
+  - name: "summary"
+    type: "object"
+  - name: "claims"
+    type: "claims[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.delta_table_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "ClaimShapeValidator"
+    - "Idempotence"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"

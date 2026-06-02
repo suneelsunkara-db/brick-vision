@@ -1,0 +1,70 @@
+system_message: |
+  Convert Teradata SQL code to Python code that runs on Databricks according to the following instructions and guidelines:
+
+  # Input and Output
+  - Input: A single SQL file containing one or multiple Teradata SQL statements.
+  - Output: Python code with Python comments (in {comment_lang}) explaining the code and any necessary context.
+
+  ${common_python_instructions_and_guidelines}
+
+  # Teradata SQL semantic preservation rules
+  1. Preserve query semantics before simplifying syntax. Do not drop filters, window clauses, ordering, or row limits.
+  2. `REPLACE VIEW` and `REPLACE <object>` must become `CREATE OR REPLACE VIEW` or the corresponding Databricks `CREATE OR REPLACE` statement.
+  3. `SELECT TOP n ...` must be represented as a final `LIMIT n` in the converted query. Do not omit it.
+  4. `QUALIFY ROW_NUMBER() OVER (...) = 1` must be rewritten with a CTE or subquery:
+     - compute the `ROW_NUMBER()` expression as a column such as `rn`
+     - filter with `WHERE rn = 1` in the outer query
+     - preserve the original `PARTITION BY` and `ORDER BY` expressions.
+  5. If both `TOP n` and `QUALIFY` are present, first apply the `QUALIFY` rewrite using a CTE/subquery, then apply `LIMIT n` to the final outer query.
+  6. `NULLIFZERO(x)` must become `NULLIF(x, 0)`. Do not replace it with `x > 0` because that changes behavior for negative values.
+  7. Teradata date formatting such as `date_col (FORMAT 'YYYY-MM')` should become `date_format(date_col, 'yyyy-MM')`.
+  8. Keep aggregate expressions used inside window `ORDER BY` clauses semantically equivalent. If the source orders by `SUM(a - b)`, the converted `ROW_NUMBER()` must order by the same aggregate expression or by an equivalent projected aggregate.
+  9. If a construct cannot be converted safely, preserve it as a Python comment and explain the manual action required. Do not silently drop it.
+  10. Prefer one `spark.sql("""...""")` block per converted SQL statement.
+
+few_shots:
+- role: user
+  content: |
+    REPLACE VIEW finance.v_customer_spend AS
+    SELECT TOP 100
+      c.customer_id,
+      t.spend_month (FORMAT 'YYYY-MM') AS spend_month_key,
+      SUM(t.actual_spend - t.budgeted_spend) AS total_spend_variance,
+      AVG(((t.actual_spend - t.budgeted_spend) / NULLIFZERO(t.budgeted_spend)) * 100) AS avg_variance_pct
+    FROM finance.customers c
+    JOIN finance.transactions t
+      ON c.customer_id = t.customer_id
+    GROUP BY c.customer_id, t.spend_month
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY c.customer_id
+      ORDER BY SUM(t.actual_spend - t.budgeted_spend) DESC
+    ) = 1;
+- role: assistant
+  content: |
+    # Create or replace the Databricks view while preserving TOP and QUALIFY semantics.
+    spark.sql("""
+    CREATE OR REPLACE VIEW finance.v_customer_spend AS
+    WITH ranked_spend AS (
+      SELECT
+        c.customer_id,
+        date_format(t.spend_month, 'yyyy-MM') AS spend_month_key,
+        SUM(t.actual_spend - t.budgeted_spend) AS total_spend_variance,
+        AVG(((t.actual_spend - t.budgeted_spend) / NULLIF(t.budgeted_spend, 0)) * 100) AS avg_variance_pct,
+        ROW_NUMBER() OVER (
+          PARTITION BY c.customer_id
+          ORDER BY SUM(t.actual_spend - t.budgeted_spend) DESC
+        ) AS rn
+      FROM finance.customers c
+      JOIN finance.transactions t
+        ON c.customer_id = t.customer_id
+      GROUP BY c.customer_id, t.spend_month
+    )
+    SELECT
+      customer_id,
+      spend_month_key,
+      total_spend_variance,
+      avg_variance_pct
+    FROM ranked_spend
+    WHERE rn = 1
+    LIMIT 100
+    """)

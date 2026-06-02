@@ -1,0 +1,70 @@
+schema_version: "1.0"
+id: "skill:databricks.statement-execute"
+version: "0.1.0"
+exemplar_of: "meta:databricks-sql/ext:statement-execution-api"
+capability_links:
+  primary:
+    - "meta:databricks-sql/ext:statement-execution-api"
+  uses: []
+title: "Bind a SQL statement to Databricks Statement Execution API"
+description: |
+  Mechanical Skill Builder gate that turns a validated SQL statement and bound
+  warehouse_id into a concrete Databricks Statement Execution API operation.
+  It does not generate SQL and does not execute locally; it emits an operation
+  that a thin Databricks API executor can run and wait on.
+when_to_use:
+  - "A SQL transform has produced validated SQL text and needs a Databricks execution operation"
+  - "Statement Execution API calls must be grounded in indexed capability evidence"
+  - "Usecase services must avoid hand-coded SQL API calls"
+load_signal:
+  embed: "Databricks SQL Statement Execution API warehouse statement operation"
+  triggers:
+    - "statement execution"
+    - "sql api operation"
+    - "warehouse_id"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:delta.sql-transform"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "capability_evidence"
+    type: "object[]"
+    required: true
+  - name: "statement"
+    type: "string"
+    required: true
+  - name: "warehouse_id"
+    type: "string"
+    required: true
+  - name: "statement_operation"
+    type: "object"
+    required: false
+outputs:
+  - name: "api_operation"
+    type: "object"
+  - name: "capability_refs"
+    type: "string[]"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.databricks_statement_execute_v0_1"
+  scorers:
+    - "StatementOperationGroundedInEvidence"
+    - "StatementOperationHasBoundWarehouseAndBody"
+constitutional:
+  - "api.operations.must.cite.capability-graph"
+  - "mutating.api.requests.must.have-bound-statement"
+  - "sql.execution.must.use-bound-warehouse"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-databricks-statement-execute"

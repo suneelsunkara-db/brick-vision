@@ -1,0 +1,121 @@
+schema_version: "1.0"
+id: "skill:ml.training-task-plan"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:databricks-ml-training-task-plan"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:databricks-ml-training-task-plan"
+  uses: []
+title: "Plan a Databricks Jobs task for approved ML training artifact"
+description: |
+  Mechanical Skill Builder gate that binds approved ML training inputs to a
+  Databricks Jobs task body. This skill does not implement model algorithms,
+  generate runtime fallbacks, or execute Databricks APIs. It requires a real
+  Databricks-native training artifact URI and emits a Jobs runs/submit request
+  body for skill:lakeflow.jobs-run-submit.
+
+when_to_use:
+  - "An approved ML strategy needs a Databricks Jobs task body"
+  - "Training inputs are bound and a real Databricks training artifact exists"
+  - "Jobs API submission must be prepared without embedding code in runtime adapters"
+load_signal:
+  embed: "ML training task plan Databricks Jobs spark_python_task training artifact rows_uri model_full_name"
+  triggers:
+    - "ml training task"
+    - "training job body"
+    - "spark python task"
+    - "training artifact uri"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.strategy-plan"
+    - "skill:ml.training-backend-select"
+    - "skill:ml.training-artifact-plan"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "strategy_plan"
+    type: "object"
+    required: true
+  - name: "backend_selection"
+    type: "object"
+    required: true
+    description: "Output from skill:ml.training-backend-select with status=ready"
+  - name: "training_driver_uri"
+    type: "string"
+    required: false
+    description: "Deprecated alias for training_artifact_uri"
+  - name: "training_artifact_uri"
+    type: "string"
+    required: true
+    description: "Workspace/Volumes/DBFS URI of an approved Databricks-native ML training artifact"
+  - name: "task_parameters"
+    type: "string[]"
+    required: false
+    description: "Exact parameters declared by the selected training artifact. If omitted, this skill builds the standard BrickVision audit contract parameters."
+  - name: "environment_dependencies"
+    type: "string[]"
+    required: false
+    description: "Optional Databricks Jobs environment dependencies declared by the selected artifact"
+  - name: "rows_uri"
+    type: "string"
+    required: true
+  - name: "model_full_name"
+    type: "string"
+    required: true
+  - name: "feature_columns"
+    type: "string[]"
+    required: true
+  - name: "label_column"
+    type: "string"
+    required: true
+  - name: "primary_key"
+    type: "string"
+    required: true
+  - name: "val_metric_name"
+    type: "string"
+    required: true
+  - name: "val_metric_floor"
+    type: "number"
+    required: true
+  - name: "split_seed"
+    type: "integer"
+    required: true
+  - name: "strategy_approval_id"
+    type: "string"
+    required: true
+  - name: "audit_table"
+    type: "string"
+    required: true
+    description: "Unity Catalog table where the driver appends ModelTrainingRun audit rows"
+  - name: "audit_id"
+    type: "string"
+    required: false
+  - name: "job_run_name"
+    type: "string"
+    required: false
+outputs:
+  - name: "job_submit_body"
+    type: "object"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_training_task_plan_v0_1"
+  scorers:
+    - "NoEmbeddedTrainingCode"
+    - "TrainingArtifactRequired"
+constitutional:
+  - "training.must.not.run.before.strategy-approval"
+  - "training.artifact.must-be-real-databricks-ref"
+  - "runtime.adapters.must.not.embed-training-code"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-training-task-plan"

@@ -1,0 +1,139 @@
+schema_version: "1.0"
+id: "skill:ml.train-evaluate-register"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:train-with-floor-and-register"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:train-with-floor-and-register"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Execute an approved Databricks ML training plan and read UC model evidence"
+description: |
+  Layer-0 skill that executes an approved Databricks-native API plan for
+  training, validation, and Unity Catalog model registration. It does not
+  implement model algorithms, synthesize training code, or run local fallbacks.
+  The selected Databricks artifact must emit a typed ``ModelTrainingRun`` audit
+  row per docs/03-primitives.md §5.19.
+
+  This skill must not select the ML problem type itself. It runs only after
+  ``skill:ml.problem-select``, ``skill:ml.feature-readiness``, and
+  ``skill:ml.strategy-plan`` have passed and a human/agent approval has bound
+  the final training parameters.
+
+  Pipeline:
+    1. Upstream ML skills choose problem type, feature readiness, model family,
+       backend, and a concrete Databricks training artifact.
+    2. ``skill:ml.training-task-plan`` and ``skill:ml.api-plan-bind`` produce a
+       grounded Jobs submit operation plus audit readback operation.
+    3. This skill executes that API plan and returns the audit row. No model
+       training logic lives inside BrickVision runtime.
+
+  Replay invariants:
+    - Databricks artifact URI, task parameters, capability refs, and audit row
+      are stored so execution can be reviewed and replayed.
+    - Feature-set hash is stamped into the audit row by the selected artifact so
+      downstream replay can detect schema/transform drift.
+
+when_to_use:
+  - "Build pipeline produces a write-side step with kind=ml_train and approved strategy_plan"
+  - "User has approved a Databricks-native ML strategy and UC registered model target"
+  - "FlightDeck reports MODEL_REGISTRATION_FLOOR_BYPASSED for an upstream model"
+
+load_signal:
+  embed: "Train evaluate register ML model val metric floor UC registry feature set"
+  triggers:
+    - "train model"
+    - "register model"
+    - "ml training"
+    - "evaluate model"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on ${BV_CATALOG}"
+    - "CREATE MODEL on ${BV_CATALOG}.<target_schema>"
+  system_schemas: []
+  tools:
+    - "tool:ml.run_training_job"
+    - "tool:ml.register_model"
+  skills:
+    - "skill:ml.problem-select"
+    - "skill:ml.feature-readiness"
+    - "skill:ml.strategy-plan"
+    - "skill:ml.model-family-select"
+    - "skill:ml.training-backend-probe"
+    - "skill:ml.training-backend-select"
+    - "skill:ml.training-artifact-plan"
+    - "skill:ml.training-task-plan"
+    - "skill:ml.api-plan-bind"
+  model_role: "ml_recipe"
+  budget:
+    max_context_tokens: 32000
+    max_total_input_tokens: 60000
+    max_total_output_tokens: 12000
+    max_tool_calls: 8
+    max_wallclock_sec: 7200
+
+inputs:
+  - name: "strategy_plan"
+    type: "object"
+    required: true
+    description: "Approved output from skill:ml.strategy-plan with status=ready_for_approval"
+  - name: "model_full_name"
+    type: "string"
+    required: true
+    pattern: "^[\\w]+\\.[\\w]+\\.[\\w]+$"
+    description: "Unity Catalog Registered Model name: catalog.schema.model"
+  - name: "feature_columns"
+    type: "string[]"
+    required: true
+  - name: "label_column"
+    type: "string"
+    required: true
+  - name: "primary_key"
+    type: "string"
+    required: true
+  - name: "rows_uri"
+    type: "string"
+    required: true
+  - name: "val_metric_name"
+    type: "string"
+    required: true
+    description: "Must be in the closed Metric registry"
+  - name: "val_metric_floor"
+    type: "number"
+    required: true
+  - name: "split_seed"
+    type: "integer"
+    required: true
+  - name: "strategy_approval_id"
+    type: "string"
+    required: true
+    description: "Audit identifier for the approved strategy plan"
+
+outputs:
+  - name: "model_training_run"
+    type: "ModelTrainingRun"
+  - name: "questions"
+    type: "questions[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_train_evaluate_register_v0_1"
+  scorers:
+    - "ValMetricFloor"
+    - "TrainingRunReplayDeterminism"
+
+constitutional:
+  - "no.shell.out"
+  - "no.network.access"
+  - "val.metric.must.be.from.closed.registry"
+  - "train.val.split.must.be.primary.key.hash.deterministic"
+  - "training.must.not.run.before.strategy-approval"
+  - "registered.model.must.be.unity-catalog"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-train-evaluate-register"

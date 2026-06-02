@@ -1,0 +1,82 @@
+schema_version: "1.0"
+id: "skill:ml.api-plan-bind"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:databricks-api-plan-bind"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:databricks-api-plan-bind"
+  uses: []
+title: "Bind an approved ML strategy to concrete Databricks API operations"
+description: |
+  Mechanical Skill Builder gate that turns an approved Databricks-native ML
+  strategy into a concrete Databricks API execution plan. This skill does not
+  choose the model, generate training code, or execute Databricks APIs. It only
+  validates that the selected API operations are grounded in capability-graph
+  evidence and that mutating requests have fully bound request bodies.
+
+when_to_use:
+  - "ML strategy is ready for approval and training inputs are bound"
+  - "Capability Graph has identified the Databricks APIs to use"
+  - "A concrete Jobs submit request and audit readback operation must be attached before training"
+load_signal:
+  embed: "Databricks Jobs runs submit SQL Statement Execution API plan bind request body ML training"
+  triggers:
+    - "bind ml api plan"
+    - "jobs runs submit body"
+    - "api execution plan"
+    - "training api plan"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.strategy-plan"
+    - "skill:lakeflow.jobs-run-submit"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "strategy_plan"
+    type: "object"
+    required: true
+    description: "Approved output from skill:ml.strategy-plan with status=ready_for_approval"
+  - name: "capability_evidence"
+    type: "object[]"
+    required: true
+    description: "Capability Graph evidence containing indexed Databricks API refs"
+  - name: "job_submit_body"
+    type: "object"
+    required: false
+    description: "Deprecated direct input; prefer job_submit_plan from skill:lakeflow.jobs-run-submit"
+  - name: "job_submit_plan"
+    type: "object"
+    required: true
+    description: "Output from skill:lakeflow.jobs-run-submit"
+  - name: "audit_readback_operation"
+    type: "object"
+    required: true
+    description: "Databricks API operation that reads back the ModelTrainingRun audit row"
+outputs:
+  - name: "strategy_plan"
+    type: "MlStrategyPlan"
+  - name: "api_execution_plan"
+    type: "object"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_api_plan_bind_v0_1"
+  scorers:
+    - "ApiPlanGroundedInCapabilityGraph"
+    - "NoUnboundMutatingApiBodies"
+constitutional:
+  - "training.must.not.run.before.strategy-approval"
+  - "api.operations.must.cite.capability-graph"
+  - "mutating.api.requests.must.have.bound-body"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-api-plan-bind"

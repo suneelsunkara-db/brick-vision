@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "_comment": "Canned 1024-dim embedding vectors keyed by sha256(text)[:16]. Loaded by brickvision_runtime.capability_graph.embed.embed_batch() when BV_FAKE_LLM=true. Override the fixture path via BV_FAKE_LLM_EMBEDDINGS_FIXTURE. Vectors use a deterministic sinusoidal seed so smoke tests can assert vector-space behaviour without needing real embeddings; in production the same code path runs Mosaic AI Foundation Model Serving against databricks-gte-large-en.",
+  "embedding_endpoint": "databricks-gte-large-en",
+  "embedding_dim": 1024,
+  "synthetic_seed": "deterministic-sinusoidal",
+  "embeddings": {}
+}

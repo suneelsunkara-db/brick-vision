@@ -1,0 +1,97 @@
+schema_version: "1.0"
+id: "skill:ml.assign-alias"
+version: "0.1.0"
+exemplar_of: "meta:model-registry/ext:assign-production-alias"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:model-registry/ext:assign-production-alias"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Assign a UC Registered Model alias to a specific version"
+description: |
+  Layer-0 mechanical skill: the canonical promotion path. Wraps UC's
+  ``set_registered_model_alias`` + emits a typed ``AliasAssignment``
+  audit row. Per docs/11-skill-catalog.md §9.1.5 + the v0.7.6.4
+  alias-driven serve-deploy contract:
+
+    1. Caller supplies (model_full_name, alias, target_version).
+    2. Skill asserts ``target_version`` was registered with
+       ``val_floor_passed=true`` (read from prior ``ModelTrainingRun``
+       audit row).
+    3. If ``alias`` is in ``<bv>.policy.production_aliases`` the
+       skill asserts a HITL approval is recorded for the same build
+       step; otherwise it emits ``ALIAS_ASSIGNMENT_HITL_REQUIRED``.
+    4. Skill calls ``ml.alias_assigner.assign_alias`` and emits the
+       audit row.
+
+  Replay invariants:
+    - The (model_full_name, alias) → version mapping is stable
+      across replays unless the alias is reassigned via this skill.
+    - The serve-deploy skill (N151) refuses to deploy a raw version;
+      it MUST resolve through the alias the assignment writes.
+
+when_to_use:
+  - "Caller wants to promote a freshly-registered model version"
+  - "Operator wants to roll back to a previously-blessed version"
+  - "FlightDeck reports MODEL_DEPLOY_REQUIRES_UC_ALIAS"
+
+load_signal:
+  embed: "Assign UC alias model registry promote champion production version"
+  triggers:
+    - "assign alias"
+    - "promote model"
+    - "champion alias"
+    - "production alias"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on ${BV_CATALOG}"
+    - "EXECUTE on <model_full_name>"
+    - "MANAGE_REGISTERED_MODEL on <model_full_name>"
+  system_schemas: []
+  tools:
+    - "tool:ml.set_registered_model_alias"
+    - "tool:hitl.request_approval"
+  skills: []
+  model_role: null
+  budget:
+    max_context_tokens: 1000
+    max_total_input_tokens: 1000
+    max_total_output_tokens: 100
+    max_tool_calls: 3
+    max_wallclock_sec: 300
+
+inputs:
+  - name: "model_full_name"
+    type: "string"
+    required: true
+    description: "Three-part UC name: <catalog>.<schema>.<model>"
+  - name: "alias"
+    type: "string"
+    required: true
+  - name: "target_version"
+    type: "integer"
+    required: true
+
+outputs:
+  - name: "alias_assignment"
+    type: "AliasAssignment"
+  - name: "questions"
+    type: "questions[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_assign_alias_v0_1"
+  scorers:
+    - "MLAliasIntegrity"
+
+constitutional:
+  - "alias.assignment.requires.val.floor.passed"
+  - "alias.assignment.requires.hitl.for.production.aliases"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-assign-alias"

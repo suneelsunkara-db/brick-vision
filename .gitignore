@@ -1,0 +1,42 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+apps/console/dist/
+apps/console/.vite/
+.vite/
+*.tsbuildinfo
+
+# Local Databricks / deployment runtime state
+install/events.jsonl
+install/install_id
+local_deploy.log
+*.local.log
+mlflow.db
+databricks.local_deploy*.json
+databricks.local_deploy*.yml
+proof-artifacts/
+
+# Local build and editor noise
+.DS_Store
+*.log
+
+# Keep committed proof fixtures explicit. Ignore transient proof run folders only.
+proof-artifacts/**/runs/
+proof-artifacts/**/tmp/
+proof-artifacts/**/.tmp/

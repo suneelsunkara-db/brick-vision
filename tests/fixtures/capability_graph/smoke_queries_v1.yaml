@@ -1,0 +1,37 @@
+# Smoke baseline v1 — locked at v0.7.7 ship.
+# Per docs/23-databricks-capability-graph.md §23.3.3 (D17 default).
+# 5 canonical queries drawn from different source authorities.
+# Refreshed quarterly via deliberate engineering review only.
+#
+# Gate: observed_hit_rate >= 0.80 (4/5 queries hit top-1).
+
+queries:
+  - query_id: smoke-sdk-cluster-create
+    query_text: "How to create a Databricks cluster programmatically"
+    expected_top_1_extension_id: "meta:compute-platform/ext:create"
+    source_authority: sdk
+    baseline_hit_rate: 0.80
+
+  - query_id: smoke-docs-dlt-pipeline
+    query_text: "Delta Live Tables pipeline creation and configuration"
+    expected_top_1_extension_id: "meta:lakeflow-declarative-pipelines/ext:create"
+    source_authority: docs
+    baseline_hit_rate: 0.80
+
+  - query_id: smoke-sdk-vector-search-index
+    query_text: "Create a Mosaic AI Vector Search index"
+    expected_top_1_extension_id: "meta:mosaic-ai-vector-search/ext:create-index"
+    source_authority: sdk
+    baseline_hit_rate: 0.80
+
+  - query_id: smoke-blog-dbt-orchestration
+    query_text: "dbt on Databricks orchestration with Lakeflow"
+    expected_top_1_extension_id: "meta:dbt-on-databricks/ext:lakeflow-orchestration"
+    source_authority: blog
+    baseline_hit_rate: 0.80
+
+  - query_id: smoke-labs-transpiler
+    query_text: "Lakebridge SQL transpiler for Teradata migration"
+    expected_top_1_extension_id: "meta:lakebridge-transpiler/ext:transpile"
+    source_authority: labs
+    baseline_hit_rate: 0.80

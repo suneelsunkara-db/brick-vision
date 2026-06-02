@@ -1,0 +1,9 @@
+{
+  "_doc": "Sample dry-run fixture for `build_uc_schema_probe` per N180 BULK. Loaded when `BV_DRY_RUN=true`. Override the path via `BV_DRY_RUN_PREFLIGHT_UC_SCHEMA_PATH`.",
+  "exists": true,
+  "owner": "bv_indexer_sp",
+  "grants": {
+    "bv_indexer_sp": ["ALL_PRIVILEGES"],
+    "bv_app_sp": ["SELECT"]
+  }
+}

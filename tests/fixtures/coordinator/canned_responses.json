@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "_comment": "Canned CoordinatorResponse rows keyed by '<skill_id>::<model_role>'. Loaded by brickvision_runtime.harness.coordinator.make_coordinator() when BV_FAKE_LLM=true. Override the file path via BV_FAKE_LLM_COORDINATOR_FIXTURE.",
+  "responses": {
+    "skill:t::skill_runtime_premium": {
+      "output_text": "{\"ok\": true}",
+      "output_json": {"ok": true},
+      "input_tokens_used": 100,
+      "output_tokens_used": 20,
+      "tool_calls": [],
+      "api_path": "fixture::canned_responses.json",
+      "reason_codes": []
+    },
+    "skill:t::sub_agent": {
+      "output_text": "{\"sub\": true}",
+      "output_json": {"sub": true},
+      "input_tokens_used": 80,
+      "output_tokens_used": 30,
+      "tool_calls": [],
+      "api_path": "fixture::canned_responses.json",
+      "reason_codes": []
+    }
+  }
+}

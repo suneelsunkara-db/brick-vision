@@ -1,0 +1,893 @@
+# N6: Databricks Asset Bundle (DAB) skeleton (v0.7.7 MVI).
+# Wires the single BrickVision-managed Job (capability_indexer) and the
+# Knowledge UI App. All build-pipeline + workspace-KG jobs were retired
+# in v0.7.7.
+bundle:
+  name: brickvision
+
+# Targets — kept lightweight so `databricks bundle validate` resolves
+# without needing a workspace round-trip. The `default` target uses
+# `mode: production` which suppresses the per-user resource-name prefix
+# and the workspace SCIM `/Me` lookup that `mode: development` performs,
+# enabling fully-offline schema validation in CI (no token required).
+#
+# Per-environment overrides (dev/staging/prod) are applied via
+# DATABRICKS_BUNDLE_TARGET and additional target stanzas can be added
+# later without touching the resources block.
+targets:
+  default:
+    mode: production
+    default: true
+    workspace:
+      host: https://example.cloud.databricks.com
+
+variables:
+  catalog:
+    description: "BrickVision install catalog (BV_CATALOG)"
+    default: "brickvision_dev"
+  schema:
+    description: "BrickVision UC schema (BV_SCHEMA)"
+    default: "brickvision"
+  vs_endpoint:
+    description: "Vector Search endpoint name (BV_VS_ENDPOINT)"
+    default: "brickvision-dev"
+  indexer_vs_index_name:
+    description: "Direct-access Vector Search index name (BV_INDEXER_VS_INDEX_NAME)"
+    default: "entity_index"
+  serverless_env_version:
+    description: "Databricks Serverless Environment version (must be '2')"
+    default: "2"
+  # v0.7.7 capability-graph indexer variables (per docs/23-databricks-capability-graph.md §23.3.6)
+  indexer_sp:
+    description: "Indexer-isolated SP name (NOT bv_app_sp; budget-namespace fenced per directive 1)"
+    default: "bv_indexer_sp"
+  indexer_alert_email:
+    description: "On-failure email for the capability-graph indexer Job"
+    default: "brickvision-ops@example.com"
+  indexer_cron:
+    description: "Indexer schedule cron (BV_INDEXER_SCHEDULE_CRON; default daily 02:00 UTC)"
+    default: "0 0 2 * * ?"
+  indexer_warehouse_id:
+    description: "Serverless SQL warehouse the persist/retention/promote tasks run Statement Execution against (BV_INDEXER_WAREHOUSE_ID)"
+    default: ""
+  indexer_state_volume:
+    description: "UC Volume name for inter-task JSON hand-off (BV_INDEXER_STATE_VOLUME)"
+    default: "indexer-state"
+  indexer_embedding_endpoint:
+    description: "FMS embedding endpoint name (LLM_EMBEDDING_TASKS)"
+    default: "databricks-qwen3-embedding-0-6b"
+  indexer_daily_token_cap:
+    description: "Hard cap on daily indexer token spend (BV_INDEXER_DAILY_TOKEN_CAP)"
+    default: "10000000"
+  indexer_freshness_tolerance_days:
+    description: "Snapshot staleness tolerance in days (BV_INDEXER_FRESHNESS_TOLERANCE_DAYS)"
+    default: "2"
+  bv_dry_run:
+    description: "Runtime dry-run gate (BV_DRY_RUN); set to 'true' for log-only execution"
+    default: "false"
+  bv_fake_llm:
+    description: "Test-control gate (BV_FAKE_LLM); set to 'true' to use canned LLM fixtures"
+    default: "false"
+  # v0.7.7 Lakebase Autoscaling — capability-graph read substrate
+  # (per docs/23-databricks-capability-graph.md §23.7 + the Lakebase
+  # Autoscaling get-started doc:
+  # https://docs.databricks.com/aws/en/oltp/projects/get-started)
+  #
+  # Synced Tables are created from <BV_CATALOG>.<BV_SCHEMA> Delta tables.
+  # Lakebase project/branch/database only identify the Postgres read
+  # target; there is no separate Lakebase catalog/schema variable.
+  lakebase_project_id:
+    description: "Lakebase Autoscaling project name (BV_LAKEBASE_PROJECT_ID)"
+    default: ""
+  lakebase_branch:
+    description: "Lakebase Autoscaling branch name (BV_LAKEBASE_BRANCH); doc default `production`"
+    default: "production"
+  lakebase_database:
+    description: "Lakebase Postgres database within the branch (BV_LAKEBASE_DATABASE)"
+    default: "databricks_postgres"
+  lakebase_sync_mode:
+    description: "Lakebase Synced Table refresh mode: snapshot | triggered | continuous (BV_LAKEBASE_SYNC_MODE)"
+    default: "snapshot"
+  # Workspace KG refresh job — external workspace config/scoping.
+  workspace_kg_cron:
+    description: "Workspace KG refresh cron (BV_WORKSPACE_KG_SCHEDULE_CRON)"
+    default: "0 0 3 * * ?"
+  workspace_profile_id:
+    description: "Active external workspace profile id (BV_ACTIVE_WORKSPACE_PROFILE)"
+    default: "partner-dev"
+  workspace_profile_config_dir:
+    description: "Workspace profile config directory (BV_CONFIG_DIR)"
+    default: "config"
+  workspace_kg_allowed_catalogs:
+    description: "Comma-separated catalog allowlist for Workspace KG refresh"
+    default: ""
+  workspace_kg_blocked_catalogs:
+    description: "Comma-separated catalog blocklist for Workspace KG refresh"
+    default: "system"
+  workspace_kg_include_system:
+    description: "Whether Workspace KG refresh may inspect system catalog"
+    default: "false"
+  evaluation_cron:
+    description: "Evaluation scorer schedule cron (BV_EVALUATION_SCHEDULE_CRON; default daily 04:00 UTC)"
+    default: "0 0 4 * * ?"
+  evaluation_warehouse_id:
+    description: "Serverless SQL warehouse used by Evaluation scorer runs (BV_EVALUATION_WAREHOUSE_ID)"
+    default: ""
+  mlflow_evaluation_experiment_id:
+    description: "Optional MLflow experiment id for BrickVision evaluation datasets/runs (BV_MLFLOW_EVALUATION_EXPERIMENT_ID)"
+    default: ""
+
+resources:
+  jobs:
+    # v0.7.7 — Capability Graph indexer (multi-task serverless Job).
+    # Per docs/23-databricks-capability-graph.md §23.3.1 / 23.3.9:
+    #   - 18-task DAG:
+    #         plan
+    #         → sdk, openapi_{aws,azure,gcp}, docs_{aws,azure,gcp}, blog, labs   (9 sources, parallel)
+    #         → graph_builder                    (fan-in)
+    #         → embed, persist                   (parallel)
+    #         → vs_upsert
+    #         → smoke
+    #         → promote
+    #         → retention, sync                  (parallel; sync is
+    #                                             the end-to-end Lakebase
+    #                                             sync completion gate.)
+    #     sync (T14) calls the Lakebase Autoscaling Synced-Tables API
+    #     to mirror the 10 UI-readable tables to Lakebase Postgres. The
+    #     synced UC views live at <BV_CATALOG>.<BV_SCHEMA>.<table>_synced
+    #     (same UC catalog/schema as the source Delta) and the Postgres-
+    #     side schema auto-equals BV_SCHEMA — see
+    #     :mod:`brickvision_runtime.capability_graph.publish` and the
+    #     Synced-Tables docs at
+    #     https://docs.databricks.com/aws/en/oltp/projects/sync-tables.
+    #   - Runs daily at 02:00 UTC (after the docs/blog fetcher at 01:00)
+    #   - Service principal isolation: bv_indexer_sp (NOT bv_app_sp);
+    #     enforces budget-namespace isolation per directive 1
+    #   - Each task is a separate spark_python_task invocation of the same
+    #     entry-point file with --task <key> per the v0.7.7 single-file
+    #     dispatcher pattern.
+    #   - Inter-task data flow: /Volumes/${var.catalog}/<BV_SCHEMA>/<BV_INDEXER_STATE_VOLUME>/runs/{{job.run_id}}/<task_key>.json
+    #     (defaults: BV_SCHEMA=brickvision, BV_INDEXER_STATE_VOLUME=indexer-state;
+    #     the Volume is the inter-task JSON hand-off channel — NOT a state store;
+    #     every typed capability-graph row lives in Delta tables.)
+    #   - Failure surfacing: 2 retries with 60s min interval, then
+    #     email_notifications + Slack webhook (per §23.3.9).
+    #
+    # Env-var propagation
+    # ===================
+    #
+    # Per docs.databricks.com/aws/en/jobs/task-parameters, serverless
+    # task environments don't support an `environment_variables` field;
+    # the canonical pattern is to expose every BV_* env var as a
+    # job-level parameter (with a DAB variable as default) and reference
+    # it from each task's `parameters: [...]` JSON array via the
+    # `{{job.parameters.<name>}}` dynamic value reference. The
+    # dispatcher's `--env KEY=VALUE` flag (repeatable) applies each
+    # KEY=VALUE to os.environ before the task function runs.
+    #
+    # Job parameters can be overridden at run time without redeploying:
+    #   databricks bundle run capability_indexer -- \
+    #     --warehouse_id=01234... --lakebase_project_id=...
+    capability_indexer:
+      name: bv_capability_indexer
+      run_as:
+        service_principal_name: ${var.indexer_sp}
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+      email_notifications:
+        on_failure: ["${var.indexer_alert_email}"]
+        no_alert_for_skipped_runs: true
+      schedule:
+        quartz_cron_expression: ${var.indexer_cron}
+        timezone_id: UTC
+        pause_status: UNPAUSED
+      parameters:
+        # The Job's run id (built-in dynamic value reference).
+        - name: run_id
+          default: "{{job.run_id}}"
+        # BV_* env surface — defaults templated from DAB variables; runtime
+        # overridable via `databricks bundle run ... -- --<name>=<val>`.
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: state_volume
+          default: ${var.indexer_state_volume}
+        - name: warehouse_id
+          default: ${var.indexer_warehouse_id}
+        - name: embedding_endpoint
+          default: ${var.indexer_embedding_endpoint}
+        - name: daily_token_cap
+          default: ${var.indexer_daily_token_cap}
+        - name: freshness_tolerance_days
+          default: ${var.indexer_freshness_tolerance_days}
+        - name: vs_endpoint
+          default: ${var.vs_endpoint}
+        - name: vs_index_name
+          default: ${var.indexer_vs_index_name}
+        - name: dry_run
+          default: ${var.bv_dry_run}
+        - name: fake_llm
+          default: ${var.bv_fake_llm}
+        - name: lakebase_project_id
+          default: ${var.lakebase_project_id}
+        - name: lakebase_branch
+          default: ${var.lakebase_branch}
+        - name: lakebase_database
+          default: ${var.lakebase_database}
+        - name: lakebase_sync_mode
+          default: ${var.lakebase_sync_mode}
+      # Job-level environments — referenced by individual tasks via
+      # environment_key. Per the DAB schema (https://docs.databricks.com/
+      # aws/en/dev-tools/bundles/resources.html#jobs), serverless tasks
+      # MUST point at a job-level environment; per-task environments
+      # blocks are not part of the serverless task contract.
+      #
+      # Three environments isolate dependency surface:
+      #   * default — every task that only touches databricks-sdk
+      #     (plan, sdk, openapi, docs, blog, labs, graph_builder, embed,
+      #     persist, promote, retention).
+      #   * vector-search — the two tasks that import
+      #     databricks.vector_search (vs_upsert, smoke).
+      #   * lakebase-publish — the sync task; calls the Synced Tables
+      #     API and then polls Lakebase Postgres until synced tables expose
+      #     the promoted snapshot.
+      environments:
+        - environment_key: default
+          spec:
+            client: ${var.serverless_env_version}
+            dependencies:
+              - "databricks-sdk>=0.68"
+        - environment_key: vector-search
+          spec:
+            client: ${var.serverless_env_version}
+            dependencies:
+              - "databricks-sdk>=0.68"
+              - "databricks-vectorsearch>=0.40"
+        - environment_key: lakebase-publish
+          spec:
+            client: ${var.serverless_env_version}
+            dependencies:
+              - "databricks-sdk>=0.68"
+              - "psycopg[binary]>=3.2,<4.0"
+      tasks:
+        # T01 — plan: write the per-run refresh plan
+        - task_key: plan
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "plan"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_INDEXER_EMBEDDING_ENDPOINT={{job.parameters.embedding_endpoint}}"
+              - "--env"
+              - "BV_INDEXER_DAILY_TOKEN_CAP={{job.parameters.daily_token_cap}}"
+              - "--env"
+              - "BV_INDEXER_FRESHNESS_TOLERANCE_DAYS={{job.parameters.freshness_tolerance_days}}"
+              - "--env"
+              - "BV_INDEXER_VS_ENDPOINT={{job.parameters.vs_endpoint}}"
+              - "--env"
+              - "BV_INDEXER_VS_INDEX_NAME={{job.parameters.vs_index_name}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+              - "--env"
+              - "BV_LAKEBASE_PROJECT_ID={{job.parameters.lakebase_project_id}}"
+              - "--env"
+              - "BV_LAKEBASE_BRANCH={{job.parameters.lakebase_branch}}"
+              - "--env"
+              - "BV_LAKEBASE_DATABASE={{job.parameters.lakebase_database}}"
+              - "--env"
+              - "BV_LAKEBASE_SYNC_MODE={{job.parameters.lakebase_sync_mode}}"
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        # T02..T06 — 5 source adapters (parallel; depend on plan)
+        - task_key: sdk
+          depends_on:
+            - task_key: plan
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "sdk"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        - task_key: openapi_aws
+          depends_on:
+            - task_key: plan
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "openapi_aws"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        # openapi_azure and openapi_gcp disabled for now (moving forward with AWS only)
+
+        - task_key: docs_aws
+          depends_on:
+            - task_key: plan
+          environment_key: default
+          timeout_seconds: 3600
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "docs_aws"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        # docs_azure and docs_gcp disabled for now (moving forward with AWS only)
+        # blog disabled (BV_INDEXER_DISABLE_BLOG=true; data pollution — re-enable when filtering is tuned)
+
+        - task_key: labs
+          depends_on:
+            - task_key: plan
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "labs"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        # T07 — graph_builder: fan-in merge of all sources
+        - task_key: graph_builder
+          depends_on:
+            - task_key: sdk
+            - task_key: openapi_aws
+            - task_key: docs_aws
+            - task_key: labs
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "graph_builder"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 1  # graph_builder is deterministic; retry adds no value
+          min_retry_interval_millis: 60000
+
+        # T08 — embed: FMS embedding generation (cache-aware)
+        - task_key: embed
+          depends_on:
+            - task_key: graph_builder
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "embed"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_EMBEDDING_ENDPOINT={{job.parameters.embedding_endpoint}}"
+              - "--env"
+              - "BV_INDEXER_DAILY_TOKEN_CAP={{job.parameters.daily_token_cap}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 2  # FMS rate-limits transient by nature
+          min_retry_interval_millis: 60000
+
+        # T09 — persist: write 6 row sets to Delta via Statement Execution
+        - task_key: persist
+          depends_on:
+            - task_key: graph_builder
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "persist"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 1  # idempotent write but Delta writes shouldn't be flakey
+          min_retry_interval_millis: 60000
+
+        # T10 — vs_upsert: Mosaic AI Vector Search upsert
+        - task_key: vs_upsert
+          depends_on:
+            - task_key: embed
+            - task_key: persist
+          environment_key: vector-search
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "vs_upsert"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_VS_ENDPOINT={{job.parameters.vs_endpoint}}"
+              - "--env"
+              - "BV_INDEXER_VS_INDEX_NAME={{job.parameters.vs_index_name}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        # T11 — smoke: validate the just-built snapshot
+        - task_key: smoke
+          depends_on:
+            - task_key: vs_upsert
+          environment_key: vector-search
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "smoke"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_VS_ENDPOINT={{job.parameters.vs_endpoint}}"
+              - "--env"
+              - "BV_INDEXER_VS_INDEX_NAME={{job.parameters.vs_index_name}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        # T12 — promote: atomic active-snapshot flip via BEGIN/MERGE/UPDATE/COMMIT
+        - task_key: promote
+          depends_on:
+            - task_key: smoke
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "promote"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        # T13 — retention: 30-day GC (always runs; retention failure
+        # is non-fatal so a failed snapshot's retention pass cleans
+        # up regardless)
+        - task_key: retention
+          depends_on:
+            - task_key: promote
+          environment_key: default
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "retention"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        # T14 — sync: Lakebase Autoscaling Synced-Tables sync.
+        # Runs in parallel with retention. Fatal end-to-end gate: the
+        # task waits until Lakebase Postgres exposes the promoted Delta
+        # snapshot and fails if sync does not catch up before timeout.
+        # Becomes a structured no-op if BV_LAKEBASE_PROJECT_ID is empty
+        # (Lakebase is not yet provisioned in the workspace).
+        - task_key: sync
+          depends_on:
+            - task_key: promote
+          environment_key: lakebase-publish
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_capability_indexer.py
+            parameters:
+              - "--task"
+              - "sync"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "BV_INDEXER_STATE_VOLUME={{job.parameters.state_volume}}"
+              - "--env"
+              - "BV_INDEXER_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_LAKEBASE_PROJECT_ID={{job.parameters.lakebase_project_id}}"
+              - "--env"
+              - "BV_LAKEBASE_BRANCH={{job.parameters.lakebase_branch}}"
+              - "--env"
+              - "BV_LAKEBASE_DATABASE={{job.parameters.lakebase_database}}"
+              - "--env"
+              - "BV_LAKEBASE_SYNC_MODE={{job.parameters.lakebase_sync_mode}}"
+              - "--env"
+              - "BV_LAKEBASE_SYNC_RESET_EXISTING=true"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+              - "--env"
+              - "BV_FAKE_LLM={{job.parameters.fake_llm}}"
+          max_retries: 1  # idempotent: existing synced tables → refresh
+          min_retry_interval_millis: 60000
+
+    # Workspace KG refresh (serverless, config-scoped).
+    #
+    # This job calculates partner workspace knowledge offline and writes
+    # Delta state first. The publish task syncs only the current read
+    # table (`workspace_claims_current`) into Lakebase as
+    # `workspace_claims_current_synced`; API/UI paths must query that
+    # Lakebase table instead of performing live workspace scans.
+    workspace_kg_refresh:
+      name: bv_workspace_kg_refresh
+      run_as:
+        service_principal_name: ${var.indexer_sp}
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+      email_notifications:
+        on_failure: ["${var.indexer_alert_email}"]
+        no_alert_for_skipped_runs: true
+      schedule:
+        quartz_cron_expression: ${var.workspace_kg_cron}
+        timezone_id: UTC
+        pause_status: UNPAUSED
+      parameters:
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: warehouse_id
+          default: ${var.indexer_warehouse_id}
+        - name: workspace_profile_id
+          default: ${var.workspace_profile_id}
+        - name: workspace_profile_config_dir
+          default: ${var.workspace_profile_config_dir}
+        - name: allowed_catalogs
+          default: ${var.workspace_kg_allowed_catalogs}
+        - name: blocked_catalogs
+          default: ${var.workspace_kg_blocked_catalogs}
+        - name: include_system
+          default: ${var.workspace_kg_include_system}
+        - name: dry_run
+          default: ${var.bv_dry_run}
+        - name: lakebase_project_id
+          default: ${var.lakebase_project_id}
+        - name: lakebase_branch
+          default: ${var.lakebase_branch}
+        - name: lakebase_database
+          default: ${var.lakebase_database}
+        - name: lakebase_sync_mode
+          default: ${var.lakebase_sync_mode}
+      environments:
+        - environment_key: workspace-kg
+          spec:
+            client: ${var.serverless_env_version}
+            dependencies:
+              - "databricks-sdk>=0.68"
+              - "PyYAML"
+        - environment_key: workspace-kg-publish
+          spec:
+            client: ${var.serverless_env_version}
+            dependencies:
+              - "databricks-sdk>=0.68"
+      tasks:
+        - task_key: refresh_uc
+          environment_key: workspace-kg
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_workspace_kg.py
+            parameters:
+              - "--task"
+              - "refresh_uc"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--workspace-profile-id"
+              - "{{job.parameters.workspace_profile_id}}"
+              - "--config-dir"
+              - "{{job.parameters.workspace_profile_config_dir}}"
+              - "--allowed-catalogs"
+              - "{{job.parameters.allowed_catalogs}}"
+              - "--blocked-catalogs"
+              - "{{job.parameters.blocked_catalogs}}"
+              - "--include-system"
+              - "{{job.parameters.include_system}}"
+              - "--env"
+              - "BV_CATALOG={{job.parameters.catalog}}"
+              - "--env"
+              - "BV_SCHEMA={{job.parameters.schema}}"
+              - "--env"
+              - "DATABRICKS_WAREHOUSE_ID={{job.parameters.warehouse_id}}"
+              - "--env"
+              - "BV_ACTIVE_WORKSPACE_PROFILE={{job.parameters.workspace_profile_id}}"
+              - "--env"
+              - "BV_CONFIG_DIR={{job.parameters.workspace_profile_config_dir}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+        - task_key: publish
+          depends_on:
+            - task_key: refresh_uc
+          environment_key: workspace-kg-publish
+          spark_python_task:
+            python_file: src/brickvision_runtime/databricks_jobs/run_workspace_kg.py
+            parameters:
+              - "--task"
+              - "publish"
+              - "--run-id"
+              - "{{job.run_id}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--lakebase-project-id"
+              - "{{job.parameters.lakebase_project_id}}"
+              - "--lakebase-branch"
+              - "{{job.parameters.lakebase_branch}}"
+              - "--lakebase-database"
+              - "{{job.parameters.lakebase_database}}"
+              - "--lakebase-sync-mode"
+              - "{{job.parameters.lakebase_sync_mode}}"
+              - "--env"
+              - "BV_DRY_RUN={{job.parameters.dry_run}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+    evaluation_scorers:
+      name: bv_evaluation_scorers
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+      schedule:
+        quartz_cron_expression: ${var.evaluation_cron}
+        timezone_id: UTC
+        pause_status: UNPAUSED
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: warehouse_id
+          default: ${var.evaluation_warehouse_id}
+        - name: mlflow_experiment_id
+          default: ${var.mlflow_evaluation_experiment_id}
+        - name: manifest
+          default: "config/evaluation/evalsets.json"
+      environments:
+        - environment_key: evaluation
+          spec:
+            client: ${var.serverless_env_version}
+            dependencies:
+              - "databricks-sdk>=0.68"
+              - "mlflow>=3.0"
+              - "databricks-agents>=1.0"
+      tasks:
+        - task_key: sync_datasets
+          environment_key: evaluation
+          spark_python_task:
+            python_file: scripts/sync_mlflow_eval_datasets.py
+            parameters:
+              - "--manifest"
+              - "{{job.parameters.manifest}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--warehouse-id"
+              - "{{job.parameters.warehouse_id}}"
+              - "--mlflow-experiment-id"
+              - "{{job.parameters.mlflow_experiment_id}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        - task_key: run_scorers
+          depends_on:
+            - task_key: sync_datasets
+          environment_key: evaluation
+          spark_python_task:
+            python_file: scripts/run_evaluation_scorers.py
+            parameters:
+              - "--manifest"
+              - "{{job.parameters.manifest}}"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--warehouse-id"
+              - "{{job.parameters.warehouse_id}}"
+              - "--mlflow-experiment-id"
+              - "{{job.parameters.mlflow_experiment_id}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        - task_key: sample_live_traces
+          depends_on:
+            - task_key: run_scorers
+          environment_key: evaluation
+          spark_python_task:
+            python_file: scripts/sample_live_evaluation_traces.py
+            parameters:
+              - "--workflow"
+              - "hipporag2_retrieval"
+              - "--event-kind"
+              - "rag_answer"
+              - "--hours"
+              - "24"
+              - "--limit"
+              - "500"
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--warehouse-id"
+              - "{{job.parameters.warehouse_id}}"
+              - "--mlflow-experiment-id"
+              - "{{job.parameters.mlflow_experiment_id}}"
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+  apps:
+    bv_console:
+      name: brickvision_console
+      source_code_path: ../apps/console

@@ -1,0 +1,128 @@
+schema_version: "1.0"
+id: "skill:uc.grant-introspect"
+version: "0.1.0"
+exemplar_of: "meta:identity-and-access/ext:introspect-effective-grants"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:identity-and-access/ext:introspect-effective-grants"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Introspect Unity Catalog grants"
+description: |
+  Walks UC grant tables and SHOW GRANTS output to emit one Claim per
+  (principal, privilege, securable) tuple into the Workspace KG. Foundational
+  for governance, least-privilege analysis, and audit reconstruction.
+
+  Mechanical (M1) — no LLM needed for the extraction step.
+
+when_to_use:
+  - "User asks 'who can read/write/manage X?'"
+  - "Workspace KG has stale or missing grant Claims (age > 24h or mass = 0)"
+  - "Pre-audit refresh, scheduled by harness.workspace-claim-emitter"
+  - "After uc.grant-recommend has been applied (capture diff)"
+
+load_signal:
+  embed: "Introspect Unity Catalog grants privileges who can access table schema catalog"
+  triggers:
+    - "who can access"
+    - "list grants"
+    - "permissions on"
+    - "show grants"
+    - "privileges"
+    - "rbac inventory"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on each target catalog"
+    - "USE SCHEMA on each target schema"
+    - "SELECT on system.information_schema.* (catalog/schema/table/routine privileges)"
+    - "BROWSE on each target catalog (for SHOW GRANTS as fallback)"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_grants_for_securable"
+    - "tool:uc.list_grants_for_principal"
+    - "tool:uc.show_grants"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null
+  budget:
+    # Mechanical skill — model_role is null, token caps omitted (v0.7.1 schema)
+    max_tool_calls: 500
+    max_wallclock_sec: 900
+
+inputs:
+  - name: "scope"
+    type: "string"
+    required: false
+    default: "metastore"
+    enum: ["metastore", "catalog", "schema", "table"]
+    description: "Granularity of the introspection sweep"
+  - name: "scope_fqn"
+    type: "string"
+    required: false
+    description: "Required if scope != metastore — the securable FQN"
+  - name: "include_inherited"
+    type: "boolean"
+    required: false
+    default: true
+    description: "Whether to expand inherited privileges to effective grants"
+
+outputs:
+  - name: "summary"
+    type: "object"
+    schema:
+      grants_seen: "integer"
+      principals_seen: "integer"
+      securables_seen: "integer"
+      claims_emitted: "integer"
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Emitted Claim shapes:
+        (principal:<name>, HAS_PRIVILEGE, "SELECT|MODIFY|USE_CATALOG|...", on:securable:<fqn>, {inherited:bool, granted_by, granted_at})
+        (principal:<name>, IS_OF_TYPE, "USER|GROUP|SERVICE_PRINCIPAL")
+        (securable:<fqn>, OWNED_BY, principal:<name>)
+
+queries:
+  catalog_privileges: |
+    SELECT grantor, grantee, catalog_name, privilege_type, is_grantable, inherited_from
+    FROM system.information_schema.catalog_privileges
+    WHERE catalog_name = :catalog
+  schema_privileges: |
+    SELECT grantor, grantee, table_catalog, table_schema, privilege_type, is_grantable, inherited_from
+    FROM system.information_schema.schema_privileges
+    WHERE table_catalog = :catalog
+      AND ( :schema IS NULL OR table_schema = :schema )
+  table_privileges: |
+    SELECT grantor, grantee, table_catalog, table_schema, table_name,
+           privilege_type, is_grantable, inherited_from
+    FROM system.information_schema.table_privileges
+    WHERE table_catalog = :catalog
+      AND ( :schema IS NULL OR table_schema = :schema )
+      AND ( :table  IS NULL OR table_name   = :table  )
+  routine_privileges: |
+    SELECT grantor, grantee, routine_catalog, routine_schema, routine_name,
+           privilege_type, is_grantable
+    FROM system.information_schema.routine_privileges
+    WHERE routine_catalog = :catalog
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.uc_grant_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "ClaimShapeValidator"
+    - "Idempotence"
+    - "InheritanceClosure"        # custom: if include_inherited=true, transitive grants are emitted
+
+constitutional:
+  - "no.write.to.uc"
+  - "no.cross.workspace.read"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-grant-introspect"

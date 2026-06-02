@@ -1,0 +1,88 @@
+schema_version: "1.0"
+id: "skill:migration.lakebridge-assess"
+version: "0.1.0"
+exemplar_of: "meta:migration-assessment/ext:lakebridge-assessment"
+capability_links:
+  primary:
+    - "meta:migration-assessment/ext:lakebridge-assessment"
+  uses:
+    - "meta:migration-assessment/ext:source-system-support-matrix"
+title: "Lakebridge Assessment readiness"
+description: |
+  Builds an evidence-backed Lakebridge assessment readiness artifact before
+  conversion. The skill checks installed Lakebridge assessment resources, source
+  system support, and UC Volume/source path bindings. It does not fabricate
+  Analyzer output when the Lakebridge assessment runtime is unavailable.
+
+when_to_use:
+  - "Before running SQL Transpile or Code Convert in a migration workflow"
+  - "When the user asks whether a source system can be assessed by Lakebridge"
+  - "When a migration run needs source inventory and complexity-readiness blockers"
+
+load_signal:
+  embed: "Lakebridge assessment analyzer readiness source inventory complexity blockers"
+  triggers:
+    - "lakebridge assessment"
+    - "migration analyzer"
+    - "run assessment"
+    - "source inventory"
+    - "assessment readiness"
+
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools:
+    - "tool:uc.list_volumes"
+  skills:
+    - "skill:migration.lakebridge-support-matrix"
+  model_role: null
+  budget:
+    max_context_tokens: 8000
+    max_total_input_tokens: 12000
+    max_total_output_tokens: 4000
+    max_tool_calls: 0
+    max_wallclock_sec: 120
+
+inputs:
+  - name: "source_system"
+    type: "string"
+    required: false
+    description: "Legacy source system, for example teradata, oracle, sqlserver, synapse"
+  - name: "source_path"
+    type: "string"
+    required: false
+    description: "Optional UC Volume path containing assessment source inventory or exports"
+  - name: "assessment_output_path"
+    type: "string"
+    required: false
+    description: "Optional UC Volume path where assessment artifacts should be written"
+  - name: "lakebridge_env_path"
+    type: "string"
+    required: false
+    description: "Optional Lakebridge virtual environment or site-packages root"
+
+outputs:
+  - name: "assessment_artifact"
+    type: "LakebridgeAssessmentReadinessArtifact"
+  - name: "readiness_checks"
+    type: "object[]"
+  - name: "support_matrix"
+    type: "object[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  scorers:
+    - "AssessmentReadinessCompleteness"
+
+constitutional:
+  - "assessment.must_not_fabricate_analyzer_output"
+  - "support.must_be_evidence_backed"
+  - "blocked.state.must_explain_missing_bindings"
+
+execution:
+  runtime: "local_readiness"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-migration-lakebridge-assess"

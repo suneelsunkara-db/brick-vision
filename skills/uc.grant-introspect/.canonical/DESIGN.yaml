@@ -1,0 +1,66 @@
+schema_version: "1.0"
+kind: "skill"
+id: "skill:uc.grant-introspect"
+version: "0.1.0"
+title: "Introspect Unity Catalog grant graph"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-grant-introspect"
+
+exemplar_of: "meta:identity-and-access/ext:introspect-effective-grants"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "mechanical_dag"
+  dag:
+    - id: "list_grants"
+      tool: "tool:uc.list_grants_full"
+      inputs:
+        catalog_filter: "{catalog_filter}"
+    - id: "build_claims"
+      kind: "pure_python"
+      function: "build_grant_claims"
+      inputs:
+        grants: "$list_grants.results"
+    - id: "emit_claims"
+      tool: "tool:kg.emit_claims"
+      inputs:
+        claims: "$build_claims.claims"
+
+requires:
+  uc_permissions:
+    - "USE METASTORE"
+    - "SELECT on system.information_schema.privileges"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_grants_full"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null
+  budget:
+    max_tool_calls: 50
+    max_wallclock_sec: 180
+  constitutional:
+    - "no.write.to.uc"
+
+inputs:
+  - name: "catalog_filter"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "summary"
+    type: "object"
+  - name: "claims"
+    type: "claims[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.uc_grant_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "ClaimShapeValidator"
+    - "Idempotence"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"

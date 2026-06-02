@@ -1,0 +1,71 @@
+schema_version: "1.0"
+kind: "skill"
+id: "skill:lineage.introspect"
+version: "0.1.0"
+title: "Introspect Unity Catalog lineage edges"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-lineage-introspect"
+
+exemplar_of: "meta:lineage-and-audit/ext:introspect-table-feed-graph"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "mechanical_dag"
+  dag:
+    - id: "fetch_lineage_rows"
+      tool: "tool:lineage.read_table_lineage"
+      inputs:
+        since_ts: "{since_ts}"
+        catalog_filter: "{catalog_filter}"
+    - id: "build_claims"
+      kind: "pure_python"
+      function: "build_lineage_claims"
+      inputs:
+        rows: "$fetch_lineage_rows.results"
+    - id: "emit_claims"
+      tool: "tool:kg.emit_claims"
+      inputs:
+        claims: "$build_claims.claims"
+
+requires:
+  uc_permissions:
+    - "USE METASTORE"
+    - "SELECT on system.access.table_lineage"
+  system_schemas:
+    - "system.access"
+  tools:
+    - "tool:lineage.read_table_lineage"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null
+  budget:
+    max_tool_calls: 100
+    max_wallclock_sec: 300
+  constitutional:
+    - "no.write.to.uc"
+    - "no.cross.workspace.read"
+
+inputs:
+  - name: "since_ts"
+    type: "string"
+    required: false
+    description: "ISO-8601 watermark; only emit edges newer than this"
+  - name: "catalog_filter"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "summary"
+    type: "object"
+  - name: "claims"
+    type: "claims[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.lineage_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "Idempotence"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"

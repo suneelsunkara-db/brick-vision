@@ -1,0 +1,102 @@
+{
+  "catalogs": [
+    {
+      "catalog_name": "main",
+      "catalog_owner": "account users",
+      "comment": "Default catalog",
+      "created": "2026-05-11T00:00:00Z"
+    }
+  ],
+  "schemas": [
+    {
+      "catalog_name": "main",
+      "schema_name": "default",
+      "schema_owner": "account users",
+      "comment": "Default schema",
+      "created": "2026-05-11T00:00:00Z"
+    }
+  ],
+  "tables": [
+    {
+      "table_catalog": "main",
+      "table_schema": "default",
+      "table_name": "customers",
+      "table_type": "BASE TABLE",
+      "data_source_format": "DELTA",
+      "table_owner": "data-eng",
+      "created": "2026-05-11T00:00:00Z",
+      "last_altered": "2026-05-11T00:00:00Z",
+      "comment": "Customer master"
+    },
+    {
+      "table_catalog": "main",
+      "table_schema": "default",
+      "table_name": "__materialization_mat_hidden_1",
+      "table_type": "MANAGED",
+      "data_source_format": "DELTA",
+      "table_owner": "data-eng",
+      "created": "2026-05-11T00:00:00Z",
+      "last_altered": "2026-05-11T00:00:00Z",
+      "comment": "Internal materialization artifact"
+    }
+  ],
+  "views": [],
+  "volumes": [],
+  "functions": [],
+  "table_profiles": {
+    "main.default.customers": {
+      "table_catalog": "main",
+      "table_schema": "default",
+      "table_name": "customers",
+      "row_count": 3,
+      "columns": [
+        {
+          "table_catalog": "main",
+          "table_schema": "default",
+          "table_name": "customers",
+          "column_name": "customer_id",
+          "ordinal_position": 1,
+          "data_type": "BIGINT",
+          "is_nullable": "NO"
+        },
+        {
+          "table_catalog": "main",
+          "table_schema": "default",
+          "table_name": "customers",
+          "column_name": "email",
+          "ordinal_position": 2,
+          "data_type": "STRING",
+          "is_nullable": "YES"
+        }
+      ],
+      "profiled_columns": [
+        {
+          "table_catalog": "main",
+          "table_schema": "default",
+          "table_name": "customers",
+          "column_name": "customer_id",
+          "ordinal_position": 1,
+          "data_type": "BIGINT",
+          "is_nullable": "NO"
+        },
+        {
+          "table_catalog": "main",
+          "table_schema": "default",
+          "table_name": "customers",
+          "column_name": "email",
+          "ordinal_position": 2,
+          "data_type": "STRING",
+          "is_nullable": "YES"
+        }
+      ],
+      "null_counts": {
+        "customer_id": 0,
+        "email": 1
+      },
+      "distinct_counts": {
+        "customer_id": 3,
+        "email": 2
+      }
+    }
+  }
+}

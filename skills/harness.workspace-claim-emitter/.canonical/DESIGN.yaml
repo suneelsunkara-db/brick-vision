@@ -1,0 +1,97 @@
+schema_version: "1.0"
+kind: "harness"
+id: "skill:harness.workspace-claim-emitter"
+version: "0.1.0"
+title: "Continuously refresh Workspace KG via scheduled introspection"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-harness-emitter"
+
+exemplar_of: "meta:agent-frameworks/ext:emit-workspace-claims-to-kg"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "skill_orchestrator"
+  composition:
+    - id: "uc_catalogs"
+      skill: "skill:uc.catalog-introspect@>=0.1"
+      mode: "full_or_incremental"
+    - id: "delta_tables"
+      skill: "skill:delta.table-introspect@>=0.1"
+      mode: "incremental_changed_tables_only"
+      depends_on: ["uc_catalogs"]
+    - id: "uc_grants"
+      skill: "skill:uc.grant-introspect@>=0.1"
+      mode: "full"
+      depends_on: ["uc_catalogs"]
+    - id: "lineage"
+      skill: "skill:lineage.introspect@>=0.1"
+      mode: "metastore_sweep_incremental"
+      depends_on: ["uc_catalogs"]
+    - id: "freshness_beliefs"
+      kind: "pure_python"
+      function: "compute_per_source_freshness"
+      depends_on: ["uc_catalogs", "delta_tables", "uc_grants", "lineage"]
+
+requires:
+  uc_permissions:
+    - "USE METASTORE"
+    - "USE CATALOG on every catalog in scope"
+    - "SELECT on system.information_schema.* and system.access.*"
+  system_schemas:
+    - "system.information_schema"
+    - "system.access"
+    - "system.storage"
+  tools:
+    - "tool:harness.invoke_skill"
+    - "tool:harness.compute_changed_tables"
+    - "tool:kg.emit_claims"
+    - "tool:kg.upsert_freshness_belief"
+  skills:
+    - "skill:uc.catalog-introspect@>=0.1"
+    - "skill:delta.table-introspect@>=0.1"
+    - "skill:uc.grant-introspect@>=0.1"
+    - "skill:lineage.introspect@>=0.1"
+  model_role: null
+  budget:
+    max_tool_calls: 5000
+    max_wallclock_sec: 7200
+  constitutional:
+    - "no.write.to.uc"
+    - "must.emit.question.on.partial.failure"
+    - "must.respect.budget.caps.per.skill"
+
+inputs:
+  - name: "mode"
+    type: "string"
+    required: false
+    default: "incremental"
+    enum: ["full", "incremental", "smoke"]
+  - name: "catalog_filter"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "summary"
+    type: "object"
+  - name: "claims"
+    type: "claims[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.workspace_emitter_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "FreshnessBeliefMonotonicity"
+    - "QuestionEmissionOnFailure"
+
+execution:
+  runtime: "serverless"
+  schedule:
+    cron: "0 2 * * *"
+    timezone: "UTC"
+    catch_up: false
+  on_failure: "emit_question"
+
+deploy:
+  job_name: "bv_workspace_claim_emitter"
+  job_kind: "spark_python_task"
+  schedule: "0 2 * * *"

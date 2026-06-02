@@ -1,0 +1,102 @@
+schema_version: "1.0"
+id: "skill:docs.lookup"
+version: "0.1.0"
+exemplar_of: "meta:agent-frameworks/ext:fetch-doc-passages-on-demand"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:agent-frameworks/ext:fetch-doc-passages-on-demand"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Look up a Databricks doc URL and add it to the knowledge graph"
+description: |
+  Layer-0 LLM-backed skill that turns a documentation URL (Databricks docs,
+  Mosaic AI blog, partner runbook, etc.) into knowledge-graph rows.
+
+  Pipeline (per docs/11-skill-catalog.md §9.1.1):
+    1. Fetch the page via tool:docs.fetch_url.
+    2. Chunk deterministically (tools.py.chunk_document) — fixed 800-token
+       windows with 80-token overlap, hash-stamped per chunk.
+    3. Emit one CONTENT Claim per chunk (predicate=CONTENT, value contains
+       chunk_text + metadata).
+    4. Call kg_extractor (model role) once per chunk to recover MENTIONS
+       rows; emit MENTIONS Claims keyed by entity_id.
+    5. Vocabulary gaps surface as typed Questions (no silent drops).
+
+when_to_use:
+  - "User asks 'what does Databricks say about X?' and the KG card is stale"
+  - "Materializer reports KG_INDEX_LAG_EXCEEDED for a doc subject"
+  - "DocsLookupFreshness scorer flags a stale doc URL"
+  - "VocabularyGapDiscipline scorer flags a previously-unknown surface form"
+
+load_signal:
+  embed: "Look up Databricks documentation page chunk knowledge graph mentions content"
+  triggers:
+    - "lookup docs"
+    - "docs.databricks.com"
+    - "databricks docs"
+    - "documentation page"
+
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools:
+    - "tool:docs.fetch_url"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: "kg_extractor"
+  budget:
+    max_context_tokens: 32000
+    max_total_input_tokens: 60000
+    max_total_output_tokens: 12000
+    max_tool_calls: 30
+    max_wallclock_sec: 120
+
+inputs:
+  - name: "url"
+    type: "string"
+    required: true
+    description: "Documentation page URL to ingest"
+  - name: "document_id"
+    type: "string"
+    required: false
+    description: "Stable subject id; defaults to a hash of the URL"
+  - name: "chunk_size_tokens"
+    type: "integer"
+    required: false
+    default: 800
+  - name: "chunk_overlap_tokens"
+    type: "integer"
+    required: false
+    default: 80
+
+outputs:
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Two predicate kinds emitted:
+        (subject=document_id, predicate=CONTENT, value={chunk_text, chunk_id, ...})
+        (subject=mention_subject_id, predicate=MENTIONS, value={evidence, kind, confidence})
+  - name: "questions"
+    type: "questions[]"
+    description: |
+      Vocabulary gaps and unparseable extractor rows surface as typed Questions.
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.docs_lookup_v0_1"
+  scorers:
+    - "DocsLookupIdempotence"
+    - "MentionExtractionPrecision"
+    - "MentionExtractionRecall"
+    - "VocabularyGapDiscipline"
+
+constitutional:
+  - "no.write.to.uc"
+  - "respect.docs.fetch.rate.limit"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-docs-lookup"

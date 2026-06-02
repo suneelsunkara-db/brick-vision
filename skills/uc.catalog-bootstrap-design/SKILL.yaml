@@ -1,0 +1,135 @@
+schema_version: "1.0"
+id: "skill:uc.catalog-bootstrap-design"
+version: "0.1.0"
+exemplar_of: "meta:unity-catalog-foundation/ext:bootstrap-catalog-design"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:unity-catalog-foundation/ext:bootstrap-catalog-design"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Design a Unity Catalog structure for a new domain"
+description: |
+  Given a domain spec (name, classification, environments, owning team, downstream
+  consumers, compliance posture), propose a UC structure: catalog + schema + volume
+  + external location names, owner principals, isolation properties, and a tag plan.
+
+  Output is design-only — caller applies via DDL or a separate bundle. Recommendation
+  cites prior Claims (existing catalogs, naming conventions in workspace) and surfaces
+  any conflict (name collision, classification mismatch) as Questions.
+
+when_to_use:
+  - "Onboarding a new business domain to the lakehouse"
+  - "Splitting an over-broad catalog into per-domain isolation boundaries"
+  - "Adding a new environment (dev/stg/prod) for an existing domain"
+
+load_signal:
+  embed: "Design Unity Catalog structure for new domain catalog schema volume external location naming convention"
+  triggers:
+    - "design uc structure"
+    - "new catalog for"
+    - "onboard domain"
+    - "isolation boundary"
+    - "uc bootstrap"
+
+requires:
+  uc_permissions:
+    - "SELECT on system.information_schema.catalogs / schemata (to detect collisions)"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_catalogs"
+    - "tool:uc.list_schemas"
+    - "tool:kg.query_beliefs"
+    - "tool:kg.emit_claims"
+  skills:
+    - "skill:uc.catalog-introspect@>=0.1"
+  model_role: "skill_runtime_default"
+  budget:
+    max_context_tokens: 28000
+    max_total_input_tokens: 50000
+    max_total_output_tokens: 10000
+    max_tool_calls: 20
+    max_wallclock_sec: 90
+    # cost_estimate_usd derived at runtime; advisory only, not enforcing
+
+inputs:
+  - name: "domain_spec"
+    type: "object"
+    required: true
+    schema:
+      domain_name: "string"
+      classification: "string"          # PUBLIC / INTERNAL / CONFIDENTIAL / RESTRICTED
+      environments: "string[]"          # e.g. ["dev","stg","prod"]
+      owning_team: "string"
+      downstream_consumers: "string[]"
+      compliance_postures: "string[]"   # e.g. ["SOC2","HIPAA","PCI"]
+      data_residency_region: "string"
+  - name: "naming_convention"
+    type: "object"
+    required: false
+    description: "Optional override; otherwise use Belief about workspace conventions"
+
+outputs:
+  - name: "design"
+    type: "object"
+    schema:
+      catalogs:
+        - name: "string"
+          environment: "string"
+          comment: "string"
+          isolation_mode: "string"           # OPEN / ISOLATED
+          managed_location: "string"
+          owner: "string"
+          tags: "map<string,string>"
+      schemas:
+        - catalog_name: "string"
+          name: "string"
+          comment: "string"
+          owner: "string"
+          tags: "map<string,string>"
+      volumes:
+        - schema_fqn: "string"
+          name: "string"
+          volume_type: "string"              # MANAGED / EXTERNAL
+          owner: "string"
+      external_locations:
+        - name: "string"
+          url: "string"
+          credential_name: "string"
+      ddl_to_apply: "string[]"               # full CREATE statements in dependency order
+      grants_to_apply: "string[]"            # GRANT statements
+      tag_assignments: "string[]"            # SET TAGS statements
+      rationale: "string"
+      evidence_claim_ids: "string[]"
+      open_questions: "string[]"
+      naming_collisions: "string[]"
+      isolation_check: "string"              # PASS / WARN / FAIL with details
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 0.85
+  golden_dataset: "uc:brickvision.evals.uc_catalog_bootstrap_v0_1"
+  scorers:
+    - "Correctness"
+    - "Guidelines:naming-convention-compliance"
+    - "Guidelines:isolation-property-correct"
+    - "Guidelines:no-collision-with-existing"
+    - "Guidelines:cite-evidence-for-conventions"
+    - "Guidelines:must-cover-all-environments"
+    - "RetrievalGroundedness"
+    - "Safety"
+
+constitutional:
+  - "no.write.to.uc"
+  - "must.emit.evidence.chain"
+  - "no.recommend.metastore.admin.required.actions"
+  - "must.respect.declared.classification"
+
+execution:
+  runtime: "serverless"
+  human_in_the_loop:
+    required: true
+    suggested_approver_group: "group:data-architects"
+    approval_ttl_minutes: 1440
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-catalog-bootstrap"

@@ -1,0 +1,120 @@
+schema_version: "1.0"
+id: "skill:uc.grant-recommend"
+version: "0.1.0"
+exemplar_of: "meta:identity-and-access/ext:recommend-minimum-grants"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:identity-and-access/ext:recommend-minimum-grants"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Recommend least-privilege Unity Catalog grants"
+description: |
+  Given an intent (e.g. "onboard team payments-eng to read silver.payments and
+  write gold.payments_marts"), propose the minimal set of UC grants required.
+  Rationale cites existing grant Claims; risks (overlap with existing groups,
+  privilege escalation paths) are surfaced as Questions.
+
+  This is the second LLM-backed v0.6 skill. It exercises judgment + KG retrieval
+  + structured output + eval against a golden least-privilege checklist.
+
+when_to_use:
+  - "Onboarding a new team or service principal to a UC scope"
+  - "Tightening overprivileged grants found by audit"
+  - "Translating a business intent into UC grant statements"
+
+load_signal:
+  embed: "Recommend Unity Catalog grants least privilege onboarding team service principal"
+  triggers:
+    - "onboard team"
+    - "grant access to"
+    - "least privilege"
+    - "minimal grants"
+    - "tighten permissions"
+    - "what should I grant"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on the target catalog (read-only — recommendation only)"
+    - "SELECT on system.information_schema.* "
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_grants_for_securable"
+    - "tool:uc.list_grants_for_principal"
+    - "tool:uc.resolve_principal"
+    - "tool:kg.query_beliefs"
+    - "tool:kg.emit_claims"
+  skills:
+    - "skill:uc.grant-introspect@>=0.1"
+  model_role: "skill_runtime_premium"
+  budget:
+    max_context_tokens: 24000
+    max_total_input_tokens: 42000
+    max_total_output_tokens: 8000
+    max_tool_calls: 20
+    max_wallclock_sec: 60
+    # cost_estimate_usd derived at runtime; advisory only, not enforcing
+
+inputs:
+  - name: "intent"
+    type: "string"
+    required: true
+    description: "Free-text or structured description of what access is needed and why"
+  - name: "principal"
+    type: "string"
+    required: true
+    description: "Target principal: user, group, or service principal name (UC-resolvable)"
+  - name: "scope_constraints"
+    type: "object"
+    required: false
+    description: "Optional: forbidden_catalogs, required_groups, max_grant_count, etc."
+
+outputs:
+  - name: "recommendation"
+    type: "object"
+    schema:
+      principal: "string"
+      grants_to_add:
+        - privilege: "string"            # SELECT / MODIFY / USE_CATALOG / etc.
+          securable_type: "string"       # CATALOG / SCHEMA / TABLE / VIEW / FUNCTION / VOLUME
+          securable_fqn: "string"
+          rationale: "string"
+          evidence_claim_ids: "string[]"
+      grants_to_revoke:                  # if tightening — overprivileged grants to drop
+        - privilege: "string"
+          securable_type: "string"
+          securable_fqn: "string"
+          rationale: "string"
+      ddl_to_apply: "string[]"           # exact GRANT/REVOKE statements
+      least_privilege_score: "number"    # 0.0-1.0
+      open_questions: "string[]"
+      risk_flags: "string[]"             # e.g. "principal_already_owns_securable", "circular_inheritance"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 0.85
+  golden_dataset: "uc:brickvision.evals.uc_grant_recommend_v0_1"
+  scorers:
+    - "Correctness"
+    - "Guidelines:least-privilege"        # custom: no recommended grant exceeds intent
+    - "Guidelines:no-redundant-grants"    # custom: no recommended grant is already in effect
+    - "Guidelines:must-cite-evidence"
+    - "Guidelines:no-fabricated-securables"
+    - "RetrievalGroundedness"
+    - "Safety"
+
+constitutional:
+  - "no.write.to.uc"
+  - "must.emit.evidence.chain"
+  - "must.surface.risk.flags"
+  - "no.recommend.account.admin.grants"
+  - "no.recommend.metastore.admin.grants"
+
+execution:
+  runtime: "serverless"
+  human_in_the_loop:
+    required: true                        # consumer must approve before applying DDL
+    suggested_approver_group: "group:uc-admins"
+    approval_ttl_minutes: 60
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-grant-rec"

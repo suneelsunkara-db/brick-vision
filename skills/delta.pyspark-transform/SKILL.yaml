@@ -1,0 +1,111 @@
+schema_version: "1.0"
+id: "skill:delta.pyspark-transform"
+version: "0.1.0"
+exemplar_of: "meta:lakeflow-declarative-pipelines/ext:pyspark-transform-with-expectations"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:lakeflow-declarative-pipelines/ext:pyspark-transform-with-expectations"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Generate, validate, and execute a PySpark Delta transform"
+description: |
+  Layer-0 LLM-backed skill that turns a structured pipeline spec into a
+  generated PySpark transform body, statically validates it, then runs it
+  on a Databricks Serverless Job. Emits a typed DataPipelineRun audit row
+  per docs/03-primitives.md §5.18 and surfaces failures (parse, forbidden
+  imports, schema drift, execution divergence) as typed Questions.
+
+  Pipeline (per docs/11-skill-catalog.md §9.1.2):
+    1. Resolve inputs against KG subject cards (kg_search at design time
+       wires the upstream URIs + schemas into the spec).
+    2. Call pyspark_codegen (model role) once to produce the transform
+       body.
+    3. ast.parse + forbidden-import lint reject the body if it imports
+       network/subprocess/filesystem-mutating modules.
+    4. Pre-flight uc_bindings asserts the write target catalog is bound
+       read-write to the executing workspace.
+    5. Submit to a Serverless Job (delegated through the runtime); the
+       Job driver writes the output table and returns the observed schema
+       + row count.
+    6. Compare observed schema against the expected_output_schema; emit
+       WRITE_SIDE_SCHEMA_DRIFT Question on mismatch (still emits the
+       audit row for replay).
+
+when_to_use:
+  - "User asks to add a Delta transform for a new derived table"
+  - "Build pipeline produces a write-side step with kind=pyspark_transform"
+  - "An upstream schema change requires regenerating a derived table"
+
+load_signal:
+  embed: "Generate PySpark Delta transform write derived table schema contract"
+  triggers:
+    - "delta transform"
+    - "pyspark transform"
+    - "derived table"
+    - "etl pyspark"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on ${BV_CATALOG}"
+    - "MODIFY on ${BV_CATALOG}.<target_schema>.<target_table>"
+  system_schemas: []
+  tools:
+    - "tool:data_pipeline.submit_pyspark_job"
+    - "tool:uc.bindings_check"
+  skills:
+    - "skill:delta.pyspark-task-plan"
+    - "skill:lakeflow.jobs-run-submit"
+  model_role: "pyspark_codegen"
+  budget:
+    max_context_tokens: 32000
+    max_total_input_tokens: 60000
+    max_total_output_tokens: 16000
+    max_tool_calls: 10
+    max_wallclock_sec: 1800
+
+inputs:
+  - name: "transform_id"
+    type: "string"
+    required: true
+  - name: "input_uris"
+    type: "string[]"
+    required: true
+  - name: "output_uri"
+    type: "string"
+    required: true
+  - name: "expected_output_schema"
+    type: "object"
+    required: true
+    description: "Map of column -> Spark type (e.g. STRING, BIGINT, TIMESTAMP)"
+  - name: "description"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "data_pipeline_run"
+    type: "DataPipelineRun"
+    description: "Typed audit row per docs/03-primitives.md §5.18"
+  - name: "questions"
+    type: "questions[]"
+    description: "Parse, forbidden-import, binding, drift, execution failures"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.delta_pyspark_transform_v0_1"
+  scorers:
+    - "TransformParseValidity"
+    - "ForbiddenImportLint"
+    - "PipelineSchemaDrift"
+    - "WriteTargetBindingHITL"
+
+constitutional:
+  - "no.shell.out"
+  - "no.network.access"
+  - "write.target.catalog.must.be.bound.read.write.to.executing.workspace"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-pyspark-transform"

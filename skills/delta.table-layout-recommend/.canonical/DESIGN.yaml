@@ -1,0 +1,87 @@
+schema_version: "1.0"
+kind: "skill"
+id: "skill:delta.table-layout-recommend"
+version: "0.1.0"
+title: "Recommend Delta table layout (partitioning + clustering + tuning)"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-layout-rec"
+
+exemplar_of: "meta:delta-lake/ext:recommend-table-layout"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "llm_with_tools"
+  model_role: "skill_runtime_premium"
+  max_turns: 6
+  system_prompt_sections:
+    - id: "role"
+      altitude: "high"
+      summary: "You recommend Delta table layout (partition keys, liquid clustering, predictive optimization, tuning) given the table's storage profile and access patterns."
+    - id: "constraints"
+      altitude: "medium"
+      summary: |
+        Cite evidence claim_ids for every recommendation.
+        Never recommend partitioning a table < 1 GB.
+        Never propose breaking changes (table re-create) without an explicit migration plan.
+    - id: "output_schema"
+      altitude: "low"
+      summary: "Emit `recommendation` matching the declared output schema, strict mode."
+  tool_pool:
+    - "tool:delta.describe_extended"
+    - "tool:delta.describe_history"
+    - "tool:kg.query_beliefs"
+  behavior_constraints:
+    must_emit_evidence_chain: true
+    must_surface_risk_flags: true
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on {target.catalog}"
+    - "SELECT on {target.table}"
+  system_schemas:
+    - "system.storage"
+  tools:
+    - "tool:delta.describe_extended"
+    - "tool:delta.describe_history"
+    - "tool:kg.query_beliefs"
+  skills:
+    - "skill:delta.table-introspect@>=0.1"
+  model_role: "skill_runtime_premium"
+  budget:
+    max_context_tokens: 24000
+    max_total_input_tokens: 42000
+    max_total_output_tokens: 8000
+    max_tool_calls: 15
+    max_wallclock_sec: 60
+  constitutional:
+    - "no.write.to.uc"
+    - "must.emit.evidence.chain"
+    - "must.surface.risk.flags"
+
+inputs:
+  - name: "target"
+    type: "string"
+    required: true
+  - name: "access_pattern_hint"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "recommendation"
+    type: "object"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 0.85
+  golden_dataset: "uc:brickvision.evals.delta_table_layout_recommend_v0_1"
+  scorers:
+    - "Correctness"
+    - "Guidelines:no-tiny-table-partition"
+    - "Guidelines:must-cite-evidence"
+    - "RetrievalGroundedness"
+    - "Safety"
+
+execution:
+  runtime: "serverless"
+  human_in_the_loop:
+    required: false
+    suggested_approver_group: "group:data-platform"
+    approval_ttl_minutes: 60

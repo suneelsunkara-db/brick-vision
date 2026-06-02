@@ -1,0 +1,82 @@
+schema_version: "1.0"
+id: "skill:migration.lakebridge-sql-transpile"
+version: "0.1.0"
+exemplar_of: "meta:migration-transpile/ext:transpile-sql"
+capability_links:
+  primary:
+    - "meta:migration-transpile/ext:transpile-sql"
+  uses:
+    - "meta:migration-transpile/ext:transpile"
+    - "meta:migration-transpile/ext:generate-sql"
+title: "Lakebridge SQL transpilation artifact bundle"
+description: |
+  Converts legacy warehouse SQL into Databricks SQL migration artifacts using
+  Lakebridge-derived transpilation evidence. The headline output is a migration
+  artifact bundle: source SQL, raw Databricks SQL, remediated Databricks SQL,
+  lineage, compatibility findings, and validation evidence. Materializing a
+  table is optional validation evidence, not the primary result.
+
+when_to_use:
+  - "A usecase includes legacy SQL that should be converted to Databricks SQL"
+  - "The user asks for Lakebridge migration or transpilation output"
+  - "Migration evidence includes source SQL, source dialect, or source-system schemas"
+
+load_signal:
+  embed: "Lakebridge migrate transpile convert Teradata Snowflake SQL to Databricks SQL"
+  triggers:
+    - "lakebridge"
+    - "migration"
+    - "transpile sql"
+    - "convert sql"
+
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills: []
+  model_role: ""
+  budget:
+    max_context_tokens: 16000
+    max_total_input_tokens: 24000
+    max_total_output_tokens: 12000
+    max_tool_calls: 0
+    max_wallclock_sec: 300
+
+inputs:
+  - name: "source_sql"
+    type: "string"
+    required: false
+  - name: "source_dialect"
+    type: "string"
+    required: false
+  - name: "target_dialect"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "migration_artifact"
+    type: "MigrationTranspileArtifact"
+  - name: "compatibility_report"
+    type: "object"
+  - name: "lineage"
+    type: "object[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  scorers:
+    - "TranspileParseValidity"
+    - "LineageExtraction"
+    - "DatabricksSqlCompatibility"
+
+constitutional:
+  - "migration.output.must.be.artifact.bundle"
+  - "materialization.must.be.optional.validation"
+  - "unsupported.syntax.must.be.reported"
+
+execution:
+  runtime: "local_artifact_bundle"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-migration-lakebridge-sql-transpile"

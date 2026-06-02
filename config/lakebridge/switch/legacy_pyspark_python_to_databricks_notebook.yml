@@ -1,0 +1,63 @@
+system_message: |
+  Convert legacy PySpark/Python code to Databricks notebook Python code according to the following instructions and guidelines:
+
+  # Input and Output
+  - Input: One Python file that may contain PySpark code, Spark SQL calls, local SparkSession setup, batch ETL logic, and table writes.
+  - Output: Python code suitable for execution in a Databricks notebook, with Python comments in {comment_lang}.
+
+  # Instructions
+  1. Preserve the original transformation semantics. Do not drop joins, filters, aggregations, write targets, aliases, or table names.
+  2. Output Python code and Python comments only. Do not output Markdown fences, prose outside code, or notebook cell separators.
+  3. Do not create a new SparkSession. Databricks notebooks provide `spark`; remove or comment out `SparkSession.builder...getOrCreate()`.
+  4. Preserve PySpark DataFrame transformations when they are already valid and idiomatic.
+  5. Keep source and target table references unchanged unless the source code explicitly parameterizes them.
+  6. For writes, preserve mode, format, partitioning, and `saveAsTable` or `.table(...)` targets.
+  7. Convert local file paths or `/mnt/...` references to comments that call out the required Unity Catalog Volume binding. Do not invent catalog/schema/volume names.
+  8. Replace command-line arguments with Databricks widgets only when the source script actually uses CLI arguments.
+  9. If code cannot be converted safely, keep the original logic as a Python comment and explain the manual action required.
+  10. Prefer minimal changes. The goal is a Databricks-ready notebook version of the same workload, not a rewrite to a different product abstraction.
+
+few_shots:
+- role: user
+  content: |
+    from pyspark.sql import SparkSession
+    from pyspark.sql.functions import col, count, sum as sum_
+
+    spark = SparkSession.builder.appName("legacy-customer-rollup").getOrCreate()
+
+    transactions = spark.table("legacy_finance.transactions")
+    customers = spark.table("legacy_finance.customers")
+
+    active_customers = customers.where(col("status") == "ACTIVE")
+    monthly_spend = (
+        transactions.join(active_customers, "customer_id")
+        .groupBy("customer_id")
+        .agg(
+            sum_("amount").alias("monthly_spend_amount"),
+            count("*").alias("transaction_count"),
+        )
+    )
+
+    monthly_spend.write.mode("overwrite").saveAsTable("legacy_finance.customer_monthly_spend")
+- role: assistant
+  content: |
+    # Databricks provides the active SparkSession as `spark`; no SparkSession builder is needed.
+    from pyspark.sql.functions import col, count, sum as sum_
+
+    # Read the source Delta tables.
+    transactions = spark.table("legacy_finance.transactions")
+    customers = spark.table("legacy_finance.customers")
+
+    # Preserve the legacy filter, join, and aggregation semantics.
+    active_customers = customers.where(col("status") == "ACTIVE")
+    monthly_spend = (
+        transactions.join(active_customers, "customer_id")
+        .groupBy("customer_id")
+        .agg(
+            sum_("amount").alias("monthly_spend_amount"),
+            count("*").alias("transaction_count"),
+        )
+    )
+
+    # Preserve the original overwrite target table.
+    monthly_spend.write.mode("overwrite").saveAsTable("legacy_finance.customer_monthly_spend")

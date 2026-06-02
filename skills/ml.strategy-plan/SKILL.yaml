@@ -1,0 +1,90 @@
+schema_version: "1.0"
+id: "skill:ml.strategy-plan"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:databricks-ml-strategy-plan"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:databricks-ml-strategy-plan"
+  uses: []
+title: "Plan a Databricks-native ML strategy before training"
+description: |
+  Mechanical Skill Builder gate that converts approved ML readiness evidence
+  into a Databricks-native strategy plan. It chooses the correct path for the
+  selected problem type: AutoML, Spark ML, forecasting, ranking/recommendation,
+  clustering, anomaly detection, Mosaic AI/RAG, or no trainable ML path.
+
+  This skill does not train or register a model. It states what must be bound
+  before downstream training can create a Unity Catalog Registered Model.
+when_to_use:
+  - "Problem selection and feature readiness passed"
+  - "A usecase needs the correct Databricks-native training path selected"
+  - "Training must be gated behind strategy approval and UC model registration requirements"
+load_signal:
+  embed: "Databricks ML strategy AutoML Spark ML forecasting ranking clustering anomaly Mosaic AI Unity Catalog registered model"
+  triggers:
+    - "ml strategy plan"
+    - "databricks native training"
+    - "unity catalog registered model"
+    - "choose training path"
+    - "model serving path"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.problem-select"
+    - "skill:ml.feature-readiness"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "problem_selection"
+    type: "object"
+    required: true
+    description: "Output from skill:ml.problem-select"
+  - name: "feature_readiness"
+    type: "object"
+    required: true
+    description: "Output from skill:ml.feature-readiness"
+  - name: "dataset_profiles"
+    type: "object[]"
+    required: true
+  - name: "model_full_name"
+    type: "string"
+    required: false
+    pattern: "^[\\w]+\\.[\\w]+\\.[\\w]+$"
+    description: "Unity Catalog model name: catalog.schema.model"
+  - name: "capability_evidence"
+    type: "object[]"
+    required: false
+    description: "Retrieved capability-graph evidence from SDK/OpenAPI/docs indexes"
+  - name: "api_operations"
+    type: "object[]"
+    required: false
+    description: "Databricks API operations selected from indexed SDK/OpenAPI evidence"
+outputs:
+  - name: "strategy_plan"
+    type: "MlStrategyPlan"
+  - name: "required_bindings"
+    type: "string[]"
+  - name: "api_execution_plan"
+    type: "object"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_strategy_plan_v0_1"
+  scorers:
+    - "DatabricksPathFit"
+    - "UcRegisteredModelRequired"
+    - "TrainingBlockedWhenReadinessFails"
+constitutional:
+  - "training.must.not.run.before.strategy-approval"
+  - "registered.model.must.be.unity-catalog"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-strategy-plan"

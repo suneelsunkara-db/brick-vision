@@ -1,0 +1,128 @@
+schema_version: "1.0"
+id: "skill:delta.table-introspect"
+version: "0.1.0"
+exemplar_of: "meta:delta-lake/ext:introspect-table-metadata"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:delta-lake/ext:introspect-table-metadata"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Introspect a Delta table's storage profile"
+description: |
+  For a given Delta table, extract its storage profile: properties, partition keys,
+  liquid clustering columns, predictive optimization status, optimize history, file
+  count and size distribution, vacuum eligibility. Emits Claims into the Workspace KG.
+
+  This is the foundational table-level introspection skill. It feeds every higher-layer
+  skill that reasons about table performance, governance, or cost (delta.table-layout-recommend,
+  uc.tag-taxonomy-design, FinOps skills in v0.8+).
+
+when_to_use:
+  - "User asks about a specific table's layout, performance, or storage"
+  - "delta.table-layout-recommend needs current state before recommending"
+  - "Workspace KG is missing or stale Claims about this table (mass < 1 or age > 24h)"
+  - "After known DDL change to the table"
+
+load_signal:
+  embed: "Introspect Delta table partition liquid clustering predictive optimization properties history"
+  triggers:
+    - "describe table"
+    - "table properties"
+    - "table partitions"
+    - "liquid clustering"
+    - "predictive optimization"
+    - "table size"
+    - "optimize history"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on {target.catalog}"
+    - "USE SCHEMA on {target.schema}"
+    - "SELECT on {target.table} (for DESCRIBE EXTENDED)"
+  system_schemas:
+    - "system.storage"             # for predictive_optimization_operations_history (if PO enabled)
+  tools:
+    - "tool:delta.describe_extended"
+    - "tool:delta.describe_history"
+    - "tool:delta.describe_detail"
+    - "tool:delta.show_tblproperties"
+    - "tool:storage.predictive_optimization_history"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null              # mechanical
+  budget:
+    # Mechanical skill — model_role is null, token caps omitted (v0.7.1 schema)
+    max_tool_calls: 8
+    max_wallclock_sec: 60
+
+inputs:
+  - name: "table_fqn"
+    type: "string"
+    required: true
+    pattern: "^[\\w]+\\.[\\w]+\\.[\\w]+$"
+    description: "Three-part table name: catalog.schema.table"
+  - name: "history_window_versions"
+    type: "integer"
+    required: false
+    default: 50
+    description: "How many DESCRIBE HISTORY versions to walk for OPTIMIZE/VACUUM Claims"
+
+outputs:
+  - name: "profile"
+    type: "object"
+    schema:
+      table_fqn: "string"
+      table_format: "string"            # DELTA / ICEBERG / etc.
+      created_at: "timestamp"
+      last_modified_at: "timestamp"
+      size_bytes: "long"
+      num_files: "integer"
+      partition_columns: "string[]"
+      clustering_columns: "string[]"     # liquid clustering, if any
+      predictive_optimization: "string"  # ENABLED / INHERIT / DISABLED
+      table_properties: "map<string,string>"
+      last_optimize_at: "timestamp"
+      last_vacuum_at: "timestamp"
+      change_data_feed_enabled: "boolean"
+      column_mapping_mode: "string"      # NONE / NAME / ID
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Emitted Claim shapes:
+        (table:{fqn}, HAS_FORMAT, "DELTA"|"ICEBERG"|...)
+        (table:{fqn}, HAS_PARTITION_KEYS, ["col1","col2"])
+        (table:{fqn}, HAS_CLUSTERING_KEYS, ["col1","col2"])     # liquid clustering
+        (table:{fqn}, HAS_PREDICTIVE_OPTIMIZATION, "ENABLED"|"INHERIT"|"DISABLED")
+        (table:{fqn}, HAS_SIZE_BYTES, long)
+        (table:{fqn}, HAS_FILE_COUNT, integer)
+        (table:{fqn}, HAS_AVG_FILE_SIZE_BYTES, long)
+        (table:{fqn}, LAST_OPTIMIZED_AT, timestamp)
+        (table:{fqn}, LAST_VACUUMED_AT, timestamp)
+        (table:{fqn}, HAS_CDF_ENABLED, boolean)
+        (table:{fqn}, HAS_COLUMN_MAPPING_MODE, "NONE"|"NAME"|"ID")
+        (table:{fqn}, HAS_PROPERTY[<key>], <value>)             # one per tblproperty
+
+operations:
+  describe_extended: "DESCRIBE EXTENDED {table_fqn}"
+  describe_detail: "DESCRIBE DETAIL {table_fqn}"
+  describe_history: "DESCRIBE HISTORY {table_fqn} LIMIT {history_window_versions}"
+  show_tblproperties: "SHOW TBLPROPERTIES {table_fqn}"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.delta_table_introspect_v0_1"
+  scorers:
+    - "ClaimShapeValidator"
+    - "ProfileFieldCompleteness"     # custom: every required field in `profile` is non-null when source supports it
+    - "Idempotence"
+
+constitutional:
+  - "no.write.to.uc"
+  - "no.cross.workspace.read"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-table-introspect"

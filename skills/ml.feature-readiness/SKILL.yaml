@@ -1,0 +1,75 @@
+schema_version: "1.0"
+id: "skill:ml.feature-readiness"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:feature-label-readiness"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:feature-label-readiness"
+  uses: []
+title: "Check whether data is ready for the selected ML strategy"
+description: |
+  Mechanical Skill Builder gate that validates whether the selected ML
+  strategy has the minimum evidence needed before training: target/label,
+  entity key, time key when required, feature columns, row volume, and leakage
+  risks.
+
+  The output is a readiness decision. Training and UC model registration remain
+  downstream skills and must not run until this check passes.
+when_to_use:
+  - "ML problem selection recommended a trainable strategy"
+  - "A usecase needs label, feature, split, or leakage validation before training"
+  - "A user wants to know why an ML usecase is not training-ready"
+load_signal:
+  embed: "ML feature readiness label target entity key time split leakage feature profile"
+  triggers:
+    - "feature readiness"
+    - "label readiness"
+    - "training ready"
+    - "leakage"
+    - "target column"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.problem-select"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "problem_type"
+    type: "string"
+    required: true
+  - name: "dataset_profiles"
+    type: "object[]"
+    required: true
+  - name: "target_column"
+    type: "string"
+    required: false
+  - name: "entity_key"
+    type: "string"
+    required: false
+  - name: "time_column"
+    type: "string"
+    required: false
+outputs:
+  - name: "feature_readiness"
+    type: "object"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_feature_readiness_v0_1"
+  scorers:
+    - "LabelReadiness"
+    - "LeakageRiskDetection"
+constitutional:
+  - "training.must.not.run.before.feature-readiness"
+  - "label.provenance.must.be.explicit"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-feature-readiness"

@@ -1,0 +1,11 @@
+extends: default
+rules:
+  line-length:
+    max: 200
+    level: warning
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+  document-start: disable
+ignore: |
+  .venv/
+  src/brickvision_runtime/_vendor/

@@ -1,0 +1,105 @@
+schema_version: "1.0"
+id: "skill:delta.sql-transform"
+version: "0.1.0"
+exemplar_of: "meta:lakeflow-declarative-pipelines/ext:sql-transform-with-expectations"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:lakeflow-declarative-pipelines/ext:sql-transform-with-expectations"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Generate, validate, and execute a SQL Delta transform"
+description: |
+  Layer-0 LLM-backed skill. Same audit-row primitive as
+  ``skill:delta.pyspark-transform`` but on the Serverless SQL warehouse
+  path. The static-validation half rejects DELETE / DROP / TRUNCATE
+  tokens — they are never the right move for a derived table and the
+  closed lint fails the build before the warehouse executes anything.
+
+  Pipeline (per docs/11-skill-catalog.md §9.1.3):
+    1. Resolve inputs against KG subject cards.
+    2. Call sql_codegen (model role) once to produce the SQL text.
+    3. Forbidden-token lint rejects DELETE / DROP / TRUNCATE.
+    4. Pre-flight uc_bindings asserts the target catalog is bound
+       read-write to the executing workspace.
+    5. Submit to the Serverless SQL warehouse; capture observed schema
+       + row count.
+    6. Compare observed schema against expected_output_schema; emit
+       WRITE_SIDE_SCHEMA_DRIFT Question on mismatch (audit row still
+       emitted for replay).
+
+when_to_use:
+  - "Build pipeline produces a write-side step with kind=sql_transform"
+  - "User asks to materialize a derived table from a SELECT"
+  - "Aggregation / projection is more naturally expressed in SQL"
+
+load_signal:
+  embed: "Generate SQL Delta transform write derived table CTAS materialize"
+  triggers:
+    - "sql transform"
+    - "ctas"
+    - "delta sql"
+    - "create table as"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on ${BV_CATALOG}"
+    - "MODIFY on ${BV_CATALOG}.<target_schema>.<target_table>"
+  system_schemas: []
+  tools:
+    - "tool:data_pipeline.submit_sql"
+    - "tool:uc.bindings_check"
+  skills:
+    - "skill:databricks.statement-execute"
+  model_role: "sql_codegen"
+  budget:
+    max_context_tokens: 32000
+    max_total_input_tokens: 60000
+    max_total_output_tokens: 8000
+    max_tool_calls: 6
+    max_wallclock_sec: 1800
+
+inputs:
+  - name: "transform_id"
+    type: "string"
+    required: true
+  - name: "input_uris"
+    type: "string[]"
+    required: true
+  - name: "output_uri"
+    type: "string"
+    required: true
+  - name: "expected_output_schema"
+    type: "object"
+    required: true
+  - name: "warehouse_id"
+    type: "string"
+    required: true
+  - name: "description"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "data_pipeline_run"
+    type: "DataPipelineRun"
+  - name: "questions"
+    type: "questions[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.delta_sql_transform_v0_1"
+  scorers:
+    - "TransformParseValidity"
+    - "ForbiddenImportLint"
+    - "PipelineSchemaDrift"
+    - "WriteTargetBindingHITL"
+
+constitutional:
+  - "no.delete.no.drop.no.truncate"
+  - "write.target.catalog.must.be.bound.read.write.to.executing.workspace"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-sql-transform"

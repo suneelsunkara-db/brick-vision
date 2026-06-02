@@ -1,0 +1,107 @@
+schema_version: "1.0"
+id: "skill:ml.serve-deploy"
+version: "0.1.0"
+exemplar_of: "meta:model-serving/ext:deploy-by-alias"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:model-serving/ext:deploy-by-alias"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Deploy a Mosaic AI Model Serving endpoint behind a UC alias"
+description: |
+  Layer-0 LLM-backed skill that creates / updates a Mosaic AI Model
+  Serving endpoint and emits a typed ``ModelDeploymentRun`` audit row
+  per docs/03-primitives.md §5.20.
+
+  Pipeline (per docs/11-skill-catalog.md §9.1.5):
+    1. KG retrieval pulls the registered-model UC name + alias from
+       upstream subject cards. The deploy refuses if the alias is
+       absent (P31 — alias-driven deploys, MODEL_DEPLOY_REQUIRES_UC_ALIAS).
+    2. ``serve_deploy`` (model role) emits the structured (workload_size,
+       scale_to_zero, traffic_split) tuple.
+    3. HITL approval is required before the deploy executes (P21);
+       the harness pauses on a HITLApproved Claim and the v0.7.6.3
+       HITL watcher (N132) handles the timeout path.
+    4. ``ml.serving.deploy_endpoint`` invokes the injected ``deploy_fn``;
+       on success the audit row is emitted, on failure a typed
+       MOSAIC_AI_ENDPOINT_STATE_INCOMPLETE Question is emitted.
+
+  Replay invariants:
+    - Same alias + same registered-model version → same endpoint name +
+      served_model_version. The v0.7.6.4 N151 patch ratchets this to
+      a strict scorer; v0.7.6.3 ships the audit-row primitive.
+
+when_to_use:
+  - "Build pipeline produces a write-side step with kind=ml_serve"
+  - "User asks 'serve this model behind an endpoint'"
+  - "FlightDeck reports SERVING_ENDPOINT_DELETED_DURING_REPLAY"
+
+load_signal:
+  embed: "Deploy serving endpoint Mosaic AI Model Serving alias UC registered model"
+  triggers:
+    - "deploy model"
+    - "serve model"
+    - "model serving"
+    - "endpoint"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on ${BV_CATALOG}"
+    - "EXECUTE on ${BV_CATALOG}.<schema>.<model>"
+  system_schemas: []
+  tools:
+    - "tool:ml.deploy_endpoint"
+    - "tool:hitl.request_approval"
+  skills: []
+  model_role: "serve_deploy"
+  budget:
+    max_context_tokens: 16000
+    max_total_input_tokens: 24000
+    max_total_output_tokens: 4000
+    max_tool_calls: 4
+    max_wallclock_sec: 1800
+
+inputs:
+  - name: "endpoint_name"
+    type: "string"
+    required: true
+  - name: "model_full_name"
+    type: "string"
+    required: true
+  - name: "alias"
+    type: "string"
+    required: true
+  - name: "workload_size"
+    type: "string"
+    required: false
+    default: "Small"
+  - name: "scale_to_zero_enabled"
+    type: "boolean"
+    required: false
+    default: true
+
+outputs:
+  - name: "model_deployment_run"
+    type: "ModelDeploymentRun"
+  - name: "questions"
+    type: "questions[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_serve_deploy_v0_1"
+  scorers:
+    - "ServeDeployAliasInvariant"
+    - "ServeDeployHITLEnforced"
+    - "MosaicAIEndpointStateRecord"
+
+constitutional:
+  - "deploy.requires.uc.alias"
+  - "deploy.requires.hitl.approval"
+  - "deploy.must.record.endpoint.state.snapshot"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-serve-deploy"

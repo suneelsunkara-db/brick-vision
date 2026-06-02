@@ -1,0 +1,156 @@
+schema_version: "1.0"
+id: "skill:lineage.introspect"
+version: "0.1.0"
+exemplar_of: "meta:lineage-and-audit/ext:introspect-table-feed-graph"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:lineage-and-audit/ext:introspect-table-feed-graph"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Introspect table and column lineage"
+description: |
+  Reads system.access.table_lineage and system.access.column_lineage to emit
+  upstream/downstream Claims for tables and columns. Foundational for impact
+  analysis, root-cause investigation, and PII propagation tracking.
+
+  Mechanical (M1). Lineage is sampled by Databricks (not 100% complete) — emitted
+  Claims carry mass = number of distinct entity_run_ids contributing to the edge,
+  which lets higher skills weight confidence accordingly.
+
+when_to_use:
+  - "User asks 'what feeds X?' or 'what does X feed?'"
+  - "Workspace KG lineage Claims are stale (age > 24h) for the queried subgraph"
+  - "Pre-impact-analysis refresh before a destructive change is proposed"
+  - "PII propagation audit (combined with column_lineage)"
+
+load_signal:
+  embed: "Introspect Databricks table column lineage upstream downstream impact analysis"
+  triggers:
+    - "what feeds"
+    - "what does this feed"
+    - "upstream tables"
+    - "downstream tables"
+    - "column origin"
+    - "lineage of"
+    - "impact analysis"
+
+requires:
+  uc_permissions:
+    - "SELECT on system.access.table_lineage"
+    - "SELECT on system.access.column_lineage"
+  system_schemas:
+    - "system.access"
+  tools:
+    - "tool:lineage.upstream"
+    - "tool:lineage.downstream"
+    - "tool:lineage.column_origin"
+    - "tool:lineage.column_consumers"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null
+  budget:
+    # Mechanical skill — model_role is null, token caps omitted (v0.7.1 schema)
+    max_tool_calls: 50
+    max_wallclock_sec: 300
+
+inputs:
+  - name: "scope"
+    type: "string"
+    required: true
+    enum: ["table_upstream", "table_downstream", "table_both", "column_origin", "column_consumers", "metastore_sweep"]
+  - name: "subject_fqn"
+    type: "string"
+    required: false
+    description: "Required for non-sweep scopes: table or column FQN"
+  - name: "max_depth"
+    type: "integer"
+    required: false
+    default: 5
+    description: "Recursive lineage walk depth"
+  - name: "lookback_days"
+    type: "integer"
+    required: false
+    default: 90
+    description: "Window over event_time for lineage emission filtering"
+
+outputs:
+  - name: "edges"
+    type: "edge[]"
+    schema:
+      source_fqn: "string"
+      source_type: "string"          # TABLE / VIEW / PATH / MATERIALIZED_VIEW / STREAMING_TABLE / METRIC_VIEW
+      target_fqn: "string"
+      target_type: "string"
+      depth: "integer"
+      mass: "integer"                # distinct entity_run_id count contributing this edge
+      first_seen: "timestamp"
+      last_seen: "timestamp"
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Emitted Claim shapes:
+        (table:{src}, FEEDS, table:{tgt}, {mass, first_seen, last_seen})
+        (column:{src.col}, FEEDS, column:{tgt.col}, {mass, first_seen, last_seen})
+        (table:{x}, IS_OF_TYPE, "TABLE"|"VIEW"|"MATERIALIZED_VIEW"|"STREAMING_TABLE"|"METRIC_VIEW")
+
+queries:
+  table_upstream: |
+    SELECT DISTINCT
+      source_table_full_name AS source_fqn,
+      source_type,
+      target_table_full_name AS target_fqn,
+      target_type,
+      COUNT(DISTINCT entity_run_id) AS mass,
+      MIN(event_time) AS first_seen,
+      MAX(event_time) AS last_seen
+    FROM system.access.table_lineage
+    WHERE target_table_full_name = :subject_fqn
+      AND event_time >= current_date() - :lookback_days
+      AND source_table_full_name IS NOT NULL
+    GROUP BY 1,2,3,4
+  table_downstream: |
+    SELECT DISTINCT
+      source_table_full_name AS source_fqn,
+      source_type,
+      target_table_full_name AS target_fqn,
+      target_type,
+      COUNT(DISTINCT entity_run_id) AS mass,
+      MIN(event_time) AS first_seen,
+      MAX(event_time) AS last_seen
+    FROM system.access.table_lineage
+    WHERE source_table_full_name = :subject_fqn
+      AND event_time >= current_date() - :lookback_days
+      AND target_table_full_name IS NOT NULL
+    GROUP BY 1,2,3,4
+  column_origin: |
+    SELECT DISTINCT
+      source_table_full_name, source_column_name,
+      target_table_full_name, target_column_name,
+      COUNT(*) AS mass,
+      MIN(event_time) AS first_seen,
+      MAX(event_time) AS last_seen
+    FROM system.access.column_lineage
+    WHERE target_table_full_name = :table_fqn
+      AND target_column_name = :column_name
+      AND event_time >= current_date() - :lookback_days
+    GROUP BY 1,2,3,4
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.lineage_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "ClaimShapeValidator"
+    - "Idempotence"
+    - "MassMonotonicity"        # custom: mass on a re-emitted edge should be >= previous mass
+
+constitutional:
+  - "no.write.to.uc"
+  - "respect.lineage.sampling.disclosure"   # always emit Question if lineage may be incomplete
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-lineage-introspect"

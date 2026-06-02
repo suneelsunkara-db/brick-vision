@@ -1,0 +1,81 @@
+schema_version: "1.0"
+id: "skill:delta.pyspark-task-plan"
+version: "0.1.0"
+exemplar_of: "meta:lakeflow-jobs/ext:pyspark-transform-task-plan"
+capability_links:
+  primary:
+    - "meta:lakeflow-jobs/ext:pyspark-transform-task-plan"
+  uses: []
+title: "Plan a Databricks Jobs task for a PySpark Delta transform"
+description: |
+  Mechanical Skill Builder gate that turns validated PySpark transform code and
+  a bound transform driver artifact URI into a concrete Jobs runs/submit body.
+  It does not submit the job and does not embed driver source in the usecase
+  service; downstream execution must flow through skill:lakeflow.jobs-run-submit.
+when_to_use:
+  - "A PySpark transform has passed codegen/static validation and needs a Jobs task body"
+  - "PySpark execution must use a real driver artifact instead of service-embedded code"
+  - "Jobs API submission should be delegated to skill:lakeflow.jobs-run-submit"
+load_signal:
+  embed: "PySpark transform Databricks Jobs spark_python_task task plan driver URI"
+  triggers:
+    - "pyspark task plan"
+    - "spark_python_task"
+    - "pyspark driver"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:delta.pyspark-transform"
+    - "skill:lakeflow.jobs-run-submit"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "transform_id"
+    type: "string"
+    required: true
+  - name: "transform_code"
+    type: "string"
+    required: true
+  - name: "input_uris"
+    type: "string[]"
+    required: true
+  - name: "output_uri"
+    type: "string"
+    required: true
+  - name: "expected_output_schema"
+    type: "object"
+    required: true
+  - name: "pyspark_driver_uri"
+    type: "string"
+    required: true
+  - name: "job_run_name"
+    type: "string"
+    required: false
+  - name: "timeout_seconds"
+    type: "number"
+    required: false
+outputs:
+  - name: "job_submit_body"
+    type: "object"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.delta_pyspark_task_plan_v0_1"
+  scorers:
+    - "PySparkTaskHasRealDriverArtifact"
+    - "PySparkTaskBodyIsBoundBeforeSubmit"
+constitutional:
+  - "pyspark.driver.must.be-real-artifact-ref"
+  - "jobs.request.body.must.be-bound-before-submit"
+  - "runtime.adapters.must.not-embed-transform-driver-code"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-pyspark-task-plan"

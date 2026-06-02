@@ -1,0 +1,142 @@
+schema_version: "1.0"
+id: "skill:uc.catalog-introspect"
+version: "0.1.0"
+exemplar_of: "meta:unity-catalog-foundation/ext:introspect-catalog-tree"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:unity-catalog-foundation/ext:introspect-catalog-tree"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Introspect Unity Catalog structure"
+description: |
+  Walks Unity Catalog catalogs, schemas, tables, views, functions, and volumes
+  reachable to the executing service principal. Emits structural Claims into the
+  Workspace KG for every object found, with provenance back to the
+  system.information_schema row that produced the Claim.
+
+  This is a foundational, mechanical (M1) skill — no LLM needed for the extraction
+  step. It bootstraps the Workspace KG so every other skill has something to retrieve.
+
+when_to_use:
+  - "Workspace KG is empty or stale (last refresh > 24h ago for any catalog)"
+  - "User asks 'what catalogs/schemas/tables exist here?' and KG belief mass is low"
+  - "Scheduled nightly refresh via harness.workspace-claim-emitter"
+  - "After a known schema migration / Lakeflow Connect ingestion change"
+
+load_signal:
+  embed: "Introspect Unity Catalog structure list catalogs schemas tables views functions volumes"
+  triggers:
+    - "what catalogs"
+    - "what schemas"
+    - "list tables"
+    - "workspace inventory"
+    - "unity catalog structure"
+    - "catalog introspection"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on each target catalog"
+    - "USE SCHEMA on each target schema"
+    - "BROWSE on each target catalog (for unprivileged enumeration)"
+    - "SELECT on system.information_schema.* (enabled per metastore)"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_catalogs"
+    - "tool:uc.list_schemas"
+    - "tool:uc.list_tables"
+    - "tool:uc.list_views"
+    - "tool:uc.list_volumes"
+    - "tool:uc.list_functions"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null            # mechanical skill — no LLM call required for extraction
+  budget:
+    # Mechanical skill — model_role is null, token caps omitted (v0.7.1 schema)
+    max_tool_calls: 200          # one per (catalog, schema) pair for large workspaces
+    max_wallclock_sec: 600
+
+inputs:
+  - name: "catalog_filter"
+    type: "string"
+    required: false
+    description: "Optional LIKE-pattern to limit enumeration to one catalog (e.g. 'analytics%')"
+  - name: "include_system"
+    type: "boolean"
+    required: false
+    default: false
+    description: "Whether to introspect the system catalog itself (default: false)"
+
+outputs:
+  - name: "summary"
+    type: "object"
+    schema:
+      catalogs_seen: "integer"
+      schemas_seen: "integer"
+      tables_seen: "integer"
+      views_seen: "integer"
+      volumes_seen: "integer"
+      functions_seen: "integer"
+      claims_emitted: "integer"
+      duration_ms: "integer"
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Claims emitted into KG with shapes:
+        (catalog:<name>, EXISTS, true, {owner, comment, created_at})
+        (schema:<fqn>, BELONGS_TO, catalog:<name>, {owner, comment, created_at})
+        (table:<fqn>, BELONGS_TO, schema:<fqn>, {table_type, data_source_format, owner, created_at, last_altered_at})
+        (view:<fqn>, BELONGS_TO, schema:<fqn>, {view_definition_hash, owner})
+        (volume:<fqn>, BELONGS_TO, schema:<fqn>, {volume_type, owner})
+        (function:<fqn>, BELONGS_TO, schema:<fqn>, {language, return_type, owner})
+
+queries:
+  catalogs: |
+    SELECT catalog_name, catalog_owner, comment, created
+    FROM system.information_schema.catalogs
+    WHERE catalog_name {catalog_filter}
+      AND (catalog_name <> 'system' OR :include_system)
+  schemas: |
+    SELECT catalog_name, schema_name, schema_owner, comment, created
+    FROM system.information_schema.schemata
+    WHERE catalog_name {catalog_filter}
+  tables: |
+    SELECT table_catalog, table_schema, table_name,
+           table_type, data_source_format, table_owner,
+           created, last_altered, comment
+    FROM system.information_schema.tables
+    WHERE table_catalog {catalog_filter}
+  views: |
+    SELECT table_catalog, table_schema, table_name,
+           sha2(view_definition, 256) AS view_definition_hash
+    FROM system.information_schema.views
+    WHERE table_catalog {catalog_filter}
+  volumes: |
+    SELECT volume_catalog, volume_schema, volume_name, volume_type, volume_owner
+    FROM system.information_schema.volumes
+    WHERE volume_catalog {catalog_filter}
+  functions: |
+    SELECT routine_catalog, routine_schema, routine_name,
+           external_language, data_type AS return_type, routine_owner
+    FROM system.information_schema.routines
+    WHERE routine_catalog {catalog_filter}
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00       # mechanical skill — must be deterministic
+  golden_dataset: "uc:brickvision.evals.uc_catalog_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"      # custom: emitted_claim_count >= expected_claim_count
+    - "ClaimShapeValidator"      # custom: every emitted Claim matches declared output schema
+    - "Idempotence"              # custom: re-running yields same Belief mass increment, not new subjects
+
+constitutional:
+  - "no.write.to.uc"             # this skill is read-only against UC
+  - "no.cross.workspace.read"
+  - "respect.user.obo.if.requested"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"     # if a catalog is unreachable, emit Question, not Claim
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-catalog-introspect"

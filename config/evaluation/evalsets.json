@@ -1,0 +1,94 @@
+{
+  "datasets": [
+    {
+      "name": "${BV_CATALOG}.${BV_SCHEMA}.bv_eval_capability_graph_retrieval_v1",
+      "workflow": "capability_graph",
+      "records": "capability_graph_retrieval_v1.jsonl",
+      "experiment_id": "${BV_MLFLOW_EVALUATION_EXPERIMENT_ID}",
+      "description": "Curated capability graph retrieval cases grounded in the BrickVision gold-set contract.",
+      "quality_gates": {
+        "top_1_hit_rate_floor": 0.8,
+        "required_record_count": 5
+      },
+      "tags": {
+        "brickvision.workflow": "capability_graph",
+        "brickvision.evalset_version": "v1"
+      }
+    },
+    {
+      "name": "${BV_CATALOG}.${BV_SCHEMA}.bv_eval_hipporag2_retrieval_v1",
+      "workflow": "hipporag2_retrieval",
+      "records": "hipporag2_retrieval_v1.jsonl",
+      "experiment_id": "${BV_MLFLOW_EVALUATION_EXPERIMENT_ID}",
+      "description": "Grounded QA and retrieval expectations for BrickVision HippoRAG2-style graph retrieval.",
+      "quality_gates": {
+        "grounded_answer_rate_floor": 0.9,
+        "document_recall_floor": 0.85
+      },
+      "tags": {
+        "brickvision.workflow": "hipporag2_retrieval",
+        "brickvision.evalset_version": "v1"
+      }
+    },
+    {
+      "name": "${BV_CATALOG}.${BV_SCHEMA}.bv_eval_workspace_context_v1",
+      "workflow": "workspace_context",
+      "records": "workspace_context_v1.jsonl",
+      "experiment_id": "${BV_MLFLOW_EVALUATION_EXPERIMENT_ID}",
+      "description": "Workspace Context and build-suggestion quality cases.",
+      "quality_gates": {
+        "evidence_completeness_floor": 0.9,
+        "false_positive_rate_ceiling": 0.1
+      },
+      "tags": {
+        "brickvision.workflow": "workspace_context",
+        "brickvision.evalset_version": "v1"
+      }
+    },
+    {
+      "name": "${BV_CATALOG}.${BV_SCHEMA}.bv_eval_usecase_lifecycle_v1",
+      "workflow": "usecase_lifecycle",
+      "records": "usecase_lifecycle_v1.jsonl",
+      "experiment_id": "${BV_MLFLOW_EVALUATION_EXPERIMENT_ID}",
+      "description": "Usecase artifact planning, validation, and go/no-go decision cases.",
+      "quality_gates": {
+        "decision_accuracy_floor": 0.95,
+        "blocker_precision_floor": 0.95
+      },
+      "tags": {
+        "brickvision.workflow": "usecase_lifecycle",
+        "brickvision.evalset_version": "v1"
+      }
+    },
+    {
+      "name": "${BV_CATALOG}.${BV_SCHEMA}.bv_eval_skill_execution_v1",
+      "workflow": "skill_execution",
+      "records": "skill_execution_v1.jsonl",
+      "experiment_id": "${BV_MLFLOW_EVALUATION_EXPERIMENT_ID}",
+      "description": "SQL, PySpark, ML, and AI skill proof behavior cases.",
+      "quality_gates": {
+        "proof_status_accuracy_floor": 0.95,
+        "runtime_blocker_recall_floor": 0.95
+      },
+      "tags": {
+        "brickvision.workflow": "skill_execution",
+        "brickvision.evalset_version": "v1"
+      }
+    },
+    {
+      "name": "${BV_CATALOG}.${BV_SCHEMA}.bv_eval_platform_cost_v1",
+      "workflow": "platform_cost",
+      "records": "platform_cost_v1.jsonl",
+      "experiment_id": "${BV_MLFLOW_EVALUATION_EXPERIMENT_ID}",
+      "description": "Operational reliability, usage instrumentation, and cost-control cases.",
+      "quality_gates": {
+        "instrumentation_gap_recall_floor": 0.95,
+        "cost_signal_presence_floor": 0.9
+      },
+      "tags": {
+        "brickvision.workflow": "platform_cost",
+        "brickvision.evalset_version": "v1"
+      }
+    }
+  ]
+}

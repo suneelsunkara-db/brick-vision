@@ -1,0 +1,130 @@
+schema_version: "1.0"
+id: "skill:delta.table-layout-recommend"
+version: "0.1.0"
+exemplar_of: "meta:delta-lake/ext:recommend-table-layout"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:delta-lake/ext:recommend-table-layout"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Recommend Delta table layout (partition / liquid cluster / predictive optimization)"
+description: |
+  Given a Delta table and its recent query workload, propose optimal layout settings:
+  partition columns, liquid clustering columns, predictive optimization on/off.
+
+  Combines mechanical introspection (delta.table-introspect) with workload analysis
+  from system.query.history. The LLM synthesizes a recommendation citing specific
+  evidence from the KG; recommendation includes rationale, expected impact, and the
+  Claims it relied upon.
+
+  This is the first v0.6 skill that exercises the harness's LLM + tool-calling +
+  KG-retrieval + eval-loop end-to-end.
+
+when_to_use:
+  - "User asks 'why is this table slow?' or 'how should I partition this table?'"
+  - "Table-level Claims indicate small-file problem, partition skew, or stale optimize"
+  - "Scheduled FinOps audit identifies high scan-cost tables"
+
+load_signal:
+  embed: "Recommend Delta table partition liquid clustering predictive optimization layout for performance and cost"
+  triggers:
+    - "table layout"
+    - "partitioning advice"
+    - "liquid clustering"
+    - "z-order"
+    - "predictive optimization"
+    - "table is slow"
+    - "small files"
+    - "scan cost"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on {target.catalog}"
+    - "USE SCHEMA on {target.schema}"
+    - "SELECT on {target.table}"
+    - "SELECT on system.query.history"
+  system_schemas:
+    - "system.query"
+    - "system.storage"
+  tools:
+    - "tool:delta.describe_extended"
+    - "tool:delta.describe_detail"
+    - "tool:query.history_for_table"
+    - "tool:storage.size_metrics"
+    - "tool:kg.query_beliefs"
+    - "tool:kg.emit_claims"
+  skills:
+    - "skill:delta.table-introspect@>=0.1"
+  model_role: "skill_runtime_default"
+  budget:
+    max_context_tokens: 32000          # attention budget per LLM turn (system + tools + retrieved + history)
+    max_total_input_tokens: 70000      # lifetime input across all turns
+    max_total_output_tokens: 10000     # lifetime output
+    max_tool_calls: 25
+    max_wallclock_sec: 90
+    # cost_estimate_usd derived at runtime; advisory only, not enforcing
+
+inputs:
+  - name: "table_fqn"
+    type: "string"
+    required: true
+    pattern: "^[\\w]+\\.[\\w]+\\.[\\w]+$"
+  - name: "workload_window_days"
+    type: "integer"
+    required: false
+    default: 30
+    description: "Lookback for system.query.history when analyzing predicate distribution"
+  - name: "constraints"
+    type: "object"
+    required: false
+    description: "Optional caller constraints: forbidden_columns, max_partition_cardinality, etc."
+
+outputs:
+  - name: "recommendation"
+    type: "object"
+    schema:
+      table_fqn: "string"
+      proposed_partition_columns: "string[]"
+      proposed_clustering_columns: "string[]"
+      proposed_predictive_optimization: "string"     # ENABLED / INHERIT / DISABLED
+      change_required: "boolean"
+      rationale: "string"
+      expected_impact:
+        scan_bytes_reduction_pct: "number"
+        small_file_count_reduction_pct: "number"
+        confidence: "number"                          # 0.0-1.0
+      evidence_claim_ids: "string[]"                  # KG Claims this recommendation cited
+      open_questions: "string[]"                      # surfaced as KG Questions
+      ddl_to_apply: "string"                          # exact ALTER TABLE statement(s)
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Emitted Claim shapes:
+        (table:{fqn}, RECOMMENDED_PARTITION_KEYS, [...], {by:skill, version, mass:1})
+        (table:{fqn}, RECOMMENDED_CLUSTERING_KEYS, [...], {by:skill, version, mass:1})
+        (table:{fqn}, EXPECTED_SCAN_REDUCTION_PCT, number, {confidence})
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 0.85
+  golden_dataset: "uc:brickvision.evals.delta_layout_recommend_v0_1"
+  scorers:
+    - "Correctness"                       # MLflow built-in — proposed layout matches expected within tolerance
+    - "Guidelines:must-cite-evidence"      # every recommendation lists evidence_claim_ids
+    - "Guidelines:no-fabricated-columns"   # proposed columns must exist in the table schema
+    - "RetrievalGroundedness"              # rationale grounded in retrieved KG Claims
+    - "Safety"                             # no destructive recommendations on prod tables without HITL flag
+
+constitutional:
+  - "no.write.to.uc"                       # recommendation only — caller applies DDL
+  - "must.emit.evidence.chain"
+  - "must.surface.gaps.as.questions"
+  - "no.recommend.on.system.tables"
+
+execution:
+  runtime: "serverless"
+  human_in_the_loop:
+    required: false                         # recommendation is read-only; HITL required only if consumer chooses to apply
+    suggested_approver_group: "group:data-platform-leads"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-delta-layout-rec"

@@ -1,0 +1,82 @@
+# Phase -1 telemetry harness — canonical-goal fixture data.
+#
+# Per docs/24-pending-tasks-tracker.md §24.3 sub-table B item 13 (N189),
+# the Phase -1 telemetry harness lives in scripts/phase_minus_1_gate.py
+# and reads this fixture for the per-stage token-budget baseline. The
+# numbers below are the empirically-calibrated constants the deleted
+# src/brickvision/stages/agent_design_stub.py used to ship; preserving
+# them here keeps the existing N0-12 gate thresholds reproducible.
+#
+# Fields per goal:
+#   id           — UC-style skill identifier; matches a folder under
+#                  ./skills/<id>/ from which the canonical IR is
+#                  extracted at gate-run time via
+#                  brickvision_runtime.extractor.extract_ir().
+#   text         — the natural-language goal text the design pipeline
+#                  is asked to produce an IR for.
+#   sketch / sections / compose — per-stage telemetry constants (one
+#                  set per goal; the harness emits the same numbers
+#                  for every run_id in 0..passes_per_goal-1 because
+#                  the gate only checks aggregate budget compliance,
+#                  not per-pass variance).
+#
+# To recalibrate after a real workspace empirics run, replace the
+# constants below with the measured means; the YAML is the canonical
+# baseline.
+
+schema_version: "1.0"
+
+goals:
+  - id: "uc.catalog-introspect"
+    text: "Introspect Unity Catalog structure mechanically."
+    sketch:
+      iterations: 1
+      input_tokens: 8500
+      output_tokens: 1400
+      wallclock_ms: 2300
+    sections:
+      iterations: 2
+      input_tokens: 58000
+      output_tokens: 11200
+      wallclock_ms: 18400
+    compose:
+      iterations: 1
+      input_tokens: 12000
+      output_tokens: 2600
+      wallclock_ms: 3800
+
+  - id: "uc.grant-recommend"
+    text: "Recommend least-privilege UC grants for a principal."
+    sketch:
+      iterations: 1
+      input_tokens: 8500
+      output_tokens: 1400
+      wallclock_ms: 2300
+    sections:
+      iterations: 2
+      input_tokens: 58000
+      output_tokens: 11200
+      wallclock_ms: 18400
+    compose:
+      iterations: 1
+      input_tokens: 12000
+      output_tokens: 2600
+      wallclock_ms: 3800
+
+  - id: "harness.workspace-claim-emitter"
+    text: "Refresh the Workspace KG nightly."
+    sketch:
+      iterations: 1
+      input_tokens: 8500
+      output_tokens: 1400
+      wallclock_ms: 2300
+    sections:
+      iterations: 2
+      input_tokens: 58000
+      output_tokens: 11200
+      wallclock_ms: 18400
+    compose:
+      iterations: 1
+      input_tokens: 12000
+      output_tokens: 2600
+      wallclock_ms: 3800

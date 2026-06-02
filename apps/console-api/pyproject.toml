@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "console-api"
+version = "0.6.0.dev0"
+description = "BrickVision Console API — FastAPI sidecar bridging the React SPA to brickvision-runtime + Databricks SDK (OBO)."
+requires-python = ">=3.11"
+authors = [{ name = "BrickVision" }]
+license = { text = "Proprietary" }
+
+# Dependencies are deliberately minimal; the heavy lifting (KG, audit,
+# skill loader, etc.) is delegated to the brickvision-runtime package
+# already shipped with the partner workspace. This sidecar is a pure
+# adapter/transport layer.
+dependencies = [
+  "fastapi>=0.115,<0.116",
+  "uvicorn[standard]>=0.32,<0.33",
+  "pydantic>=2.9,<3.0",
+  "websockets>=13.0,<14.0",
+  "databricks-sdk>=0.68",
+  "mlflow-skinny>=3.0",
+  # Lakebase Autoscaling read substrate (psycopg + workspace OAuth tokens).
+  # The indexer's T14 publish task creates Synced Tables in Lakebase
+  # Postgres; this sidecar reads them via psycopg for low-latency UI
+  # page loads. The "binary" extra ships pre-built wheels so we don't
+  # need libpq + a C toolchain in the deploy image.
+  "psycopg[binary]>=3.2,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "httpx>=0.27",
+  "ruff>=0.7",
+  "mypy>=1.13",
+]
+
+[project.scripts]
+console-api = "console_api.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/console_api"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+warn_unreachable = true
+ignore_missing_imports = true

@@ -1,0 +1,162 @@
+# BrickVision Console — partner-facing string table (N109).
+#
+# Single source of truth for partner-mode console copy; seeded
+# from the canonical translation table in
+# docs/12-visual-builder.md §10.6. Every console surface
+# references entries here via ui_strings.lookup(surface, string_id);
+# inlining partner-facing copy in JSX is forbidden (P9 — vocabulary
+# discipline). The VocabularyAccessibility() scorer (N110) lints
+# this file + every rendered surface to confirm:
+#
+#   1. Every internal symbol that surfaces on a console route
+#      has an entry here.
+#   2. The primary copy (`primary` field) is plain language; the
+#      internal symbol (`secondary_symbol` field) appears as the
+#      muted parenthesised secondary token only.
+#   3. Reverse-orientation rows (symbol-as-headline) fail with
+#      VOCAB_INTERNAL_VOCAB_AS_PRIMARY.
+#
+# Schema:
+#   <surface_id>:
+#     <string_id>:
+#       primary: "..."          # the headline copy
+#       secondary_symbol: "..."  # OPTIONAL: the muted symbol token
+#       internal_symbols:        # block-style sequence of bare strings
+#         - "..."
+#         - "..."
+
+build_history:
+  loop_outer:
+    primary: "design retries"
+    secondary_symbol: "(O)"
+    internal_symbols:
+      - "OUTER"
+  status_paused_hitl:
+    primary: "Paused for review"
+    secondary_symbol: "(paused_hitl)"
+    internal_symbols:
+      - "paused_hitl"
+  status_succeeded:
+    primary: "Done"
+    internal_symbols:
+      - "succeeded"
+  status_failed:
+    primary: "Failed"
+    internal_symbols:
+      - "failed"
+
+build_inspector:
+  loop_outer:
+    primary: "design retries"
+    secondary_symbol: "(OUTER-loop)"
+    internal_symbols:
+      - "OUTER"
+  loop_middle_iter:
+    primary: "Repairing inconsistencies"
+    secondary_symbol: "(MIDDLE iter)"
+    internal_symbols:
+      - "MIDDLE"
+  loop_inner_iter:
+    primary: "Refining"
+    secondary_symbol: "(INNER iter)"
+    internal_symbols:
+      - "INNER"
+  stage_a:
+    primary: "Outline"
+    secondary_symbol: "(Stage A)"
+    internal_symbols:
+      - "Stage_A"
+  stage_b:
+    primary: "Detail"
+    secondary_symbol: "(Stage B)"
+    internal_symbols:
+      - "Stage_B"
+  stage_c:
+    primary: "Assemble"
+    secondary_symbol: "(Stage C)"
+    internal_symbols:
+      - "Stage_C"
+  route_to_section:
+    primary: "Sending back to the section step"
+    secondary_symbol: "(route_to_section)"
+    internal_symbols:
+      - "route_to_section"
+  self_refine:
+    primary: "Refining"
+    secondary_symbol: "(self_refine)"
+    internal_symbols:
+      - "self_refine"
+  invariant_repair:
+    primary: "Fixing inconsistencies in the design"
+    secondary_symbol: "(invariant repair)"
+    internal_symbols:
+      - "invariant_repair"
+  validation_finding:
+    primary: "Issue"
+    secondary_symbol: "(ValidationFinding)"
+    internal_symbols:
+      - "ValidationFinding"
+
+ir_inspector:
+  ir:
+    primary: "Design"
+    secondary_symbol: "(IR · DesignArtifact)"
+    internal_symbols:
+      - "IR"
+      - "DesignArtifact"
+  hitl_gate:
+    primary: "Review needed"
+    secondary_symbol: "(HITL gate)"
+    internal_symbols:
+      - "HITL"
+  emit_question:
+    primary: "Reject and ask BrickVision a clarifying question"
+    secondary_symbol: "(emit Question)"
+    internal_symbols:
+      - "emit_Question"
+  model_role_default:
+    primary: "Default model for skills"
+    secondary_symbol: "(skill_runtime_default)"
+    internal_symbols:
+      - "skill_runtime_default"
+
+observability:
+  loop_outer_label:
+    primary: "Avg design retries per build"
+    secondary_symbol: "(OUTER-loop)"
+    internal_symbols:
+      - "OUTER"
+  reason_code_strict_schema:
+    primary: "The selected model can't guarantee strict JSON schema for this call"
+    secondary_symbol: "(STRICT_SCHEMA_NOT_GUARANTEED)"
+    internal_symbols:
+      - "STRICT_SCHEMA_NOT_GUARANTEED"
+  reason_code_budget_exceeded:
+    primary: "Build exceeded its token budget"
+    secondary_symbol: "(BUDGET_EXCEEDED)"
+    internal_symbols:
+      - "BUDGET_EXCEEDED"
+
+shell:
+  fms_label:
+    primary: "LLM"
+    secondary_symbol: "(FMS)"
+    internal_symbols:
+      - "FMS"
+  build_pipeline_run:
+    primary: "Build run"
+    secondary_symbol: "(BuildPipelineRun)"
+    internal_symbols:
+      - "BuildPipelineRun"
+
+audit_log:
+  audit_table:
+    primary: "Audit log"
+    secondary_symbol: "(<bv>.audit.events)"
+    internal_symbols:
+      - "audit.events"
+  kg_table:
+    primary: "Knowledge graph"
+    secondary_symbol: "(<bv>.kg.claims)"
+    internal_symbols:
+      - "kg.claims"

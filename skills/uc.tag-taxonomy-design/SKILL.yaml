@@ -1,0 +1,119 @@
+schema_version: "1.0"
+id: "skill:uc.tag-taxonomy-design"
+version: "0.1.0"
+exemplar_of: "meta:row-column-security/ext:design-domain-taxonomy"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:row-column-security/ext:design-domain-taxonomy"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Design a UC tag taxonomy for a domain or compliance posture"
+description: |
+  Propose a tag schema (tag keys + allowed values + applicability rules) for a
+  given domain and compliance posture. Tags drive ABAC row/column filters,
+  cost attribution, retention policies, and PII handling.
+
+  Output cites: workspace KG (existing tags found via uc.catalog-introspect), the
+  customer's compliance posture from harness config, and reference taxonomies
+  loaded into the Knowledge VS index.
+
+when_to_use:
+  - "New compliance posture introduced (HIPAA, GDPR, PCI, SOC2)"
+  - "Existing tag use is inconsistent across a domain"
+  - "Setting up cost attribution by team / project / environment"
+  - "Pre-uc.catalog-bootstrap-design as input to its tag plan"
+
+load_signal:
+  embed: "Design Unity Catalog tag taxonomy compliance HIPAA GDPR PCI SOC2 cost attribution retention PII"
+  triggers:
+    - "tag taxonomy"
+    - "tag schema"
+    - "compliance tags"
+    - "cost attribution tags"
+    - "retention tags"
+    - "pii tagging"
+
+requires:
+  uc_permissions:
+    - "SELECT on system.information_schema.* "
+    - "BROWSE on target catalogs (to read existing tags via tag_assignments view)"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_tag_assignments"
+    - "tool:vs.search_knowledge"          # query Knowledge VS for reference taxonomies
+    - "tool:kg.query_beliefs"
+    - "tool:kg.emit_claims"
+  skills:
+    - "skill:uc.catalog-introspect@>=0.1"
+  model_role: "skill_runtime_default"
+  budget:
+    max_context_tokens: 28000
+    max_total_input_tokens: 50000
+    max_total_output_tokens: 10000
+    max_tool_calls: 20
+    max_wallclock_sec: 90
+    # cost_estimate_usd derived at runtime; advisory only, not enforcing
+
+inputs:
+  - name: "scope"
+    type: "object"
+    required: true
+    schema:
+      domain_name: "string"
+      catalogs: "string[]"
+      compliance_postures: "string[]"     # ["HIPAA","GDPR","PCI","SOC2"]
+      cost_attribution_dimensions: "string[]"   # ["team","project","environment"]
+      retention_policies: "string[]"      # ["7d","30d","90d","1y","7y","permanent"]
+  - name: "existing_tags_to_preserve"
+    type: "string[]"
+    required: false
+
+outputs:
+  - name: "taxonomy"
+    type: "object"
+    schema:
+      tag_keys:
+        - key: "string"
+          allowed_values: "string[]"      # or "OPEN" if free-form
+          required: "boolean"
+          applies_to: "string[]"          # securable types: CATALOG / SCHEMA / TABLE / COLUMN
+          drives:
+            - capability: "string"        # "row_filter" | "column_mask" | "cost_attribution" | "retention" | "audit_filter"
+              rationale: "string"
+          rationale: "string"
+          evidence_claim_ids: "string[]"
+      compliance_coverage:
+        - posture: "string"
+          required_dimensions: "string[]"  # what compliance needs
+          covered_by_keys: "string[]"      # which proposed keys cover them
+          gaps: "string[]"
+      ddl_to_apply: "string[]"             # ALTER ... SET TAGS statements
+      open_questions: "string[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 0.85
+  golden_dataset: "uc:brickvision.evals.uc_tag_taxonomy_v0_1"
+  scorers:
+    - "Correctness"
+    - "Guidelines:must-cover-declared-postures"
+    - "Guidelines:no-conflicting-allowed-values"
+    - "Guidelines:must-cite-reference-taxonomy"
+    - "RetrievalGroundedness"
+    - "Safety"
+
+constitutional:
+  - "no.write.to.uc"
+  - "must.emit.evidence.chain"
+  - "must.cover.all.declared.compliance.postures"
+  - "must.surface.coverage.gaps.as.questions"
+
+execution:
+  runtime: "serverless"
+  human_in_the_loop:
+    required: true
+    suggested_approver_group: "group:data-governance"
+    approval_ttl_minutes: 2880
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-tag-taxonomy"

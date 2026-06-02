@@ -1,0 +1,89 @@
+schema_version: "1.0"
+id: "skill:ml.training-backend-select"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:databricks-ml-training-backend-select"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:databricks-ml-training-backend-select"
+  uses: []
+title: "Select a Databricks-native ML training backend"
+description: |
+  Mechanical Skill Builder gate that selects a training backend only when the
+  approved ML strategy, execution surface, and capability evidence prove that
+  backend is valid. This skill selects artifact-backed Databricks execution
+  paths; it does not train, embed model code, or choose a convenient fallback.
+  If no backend is supported, it blocks training.
+
+when_to_use:
+  - "An approved ML strategy needs a runtime-compatible training backend"
+  - "Databricks AutoML, Spark ML, Mosaic AI, or another backend must be selected from evidence"
+  - "Training must block when the runtime surface does not support the desired backend"
+load_signal:
+  embed: "Databricks ML backend select AutoML Spark ML Mosaic AI serverless Jobs runtime capability evidence"
+  triggers:
+    - "ml backend select"
+    - "training backend"
+    - "automl unavailable"
+    - "serverless ml runtime"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.strategy-plan"
+    - "skill:ml.model-family-select"
+    - "skill:ml.training-backend-probe"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "strategy_plan"
+    type: "object"
+    required: true
+  - name: "feature_readiness"
+    type: "object"
+    required: true
+  - name: "dataset_profiles"
+    type: "object[]"
+    required: true
+  - name: "runtime_surface"
+    type: "string"
+    required: true
+    description: "Example: serverless_jobs, classic_job_cluster, model_serving"
+  - name: "capability_evidence"
+    type: "object[]"
+    required: true
+  - name: "model_family"
+    type: "object"
+    required: false
+    description: "Output from skill:ml.model-family-select"
+  - name: "runtime_evidence"
+    type: "object"
+    required: false
+    description: "Observed runtime facts such as automl_available=false"
+outputs:
+  - name: "selected_backend"
+    type: "object"
+  - name: "supported_backends"
+    type: "object[]"
+  - name: "rejected_backends"
+    type: "object[]"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_training_backend_select_v0_1"
+  scorers:
+    - "BackendSelectedOnlyWithEvidence"
+    - "BackendRejectedWhenRuntimeUnsupported"
+constitutional:
+  - "training.backend.must.be-capability-proven"
+  - "training.backend.must.match-runtime-surface"
+  - "no.unproven.backend-fallback"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-training-backend-select"

@@ -1,0 +1,5 @@
+{
+  "_doc": "Sample dry-run fixture for `brickvision indexer refresh` per N179 BULK. Loaded by `src/brickvision/cli/indexer.py:_read_dry_run_refresh` when `BV_DRY_RUN=true`. Override the path via `BV_DRY_RUN_REFRESH_PATH` for test isolation. The CLI echoes the `run_id` back so a CI flow can pin its expected output.",
+  "run_id": 99999999,
+  "message": "dry-run synthetic run_id; no real Job activity"
+}

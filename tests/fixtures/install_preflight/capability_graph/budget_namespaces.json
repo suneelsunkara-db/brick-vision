@@ -1,0 +1,11 @@
+{
+  "_doc": "Sample dry-run fixture for `build_budget_namespace_probe` per N180 BULK. Loaded when `BV_DRY_RUN=true`. Override the path via `BV_DRY_RUN_PREFLIGHT_BUDGET_NAMESPACES_PATH`.",
+  "namespaces": {
+    "app": "brickvision.config.budget_ledger_app",
+    "indexer": "brickvision.config.budget_ledger_indexer"
+  },
+  "env_resolution": {
+    "bv_app_sp": "app",
+    "bv_indexer_sp": "indexer"
+  }
+}

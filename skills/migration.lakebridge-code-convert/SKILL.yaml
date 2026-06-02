@@ -1,0 +1,87 @@
+schema_version: "1.0"
+id: "skill:migration.lakebridge-code-convert"
+version: "0.1.0"
+exemplar_of: "meta:migration-transpile/ext:code-convert"
+capability_links:
+  primary:
+    - "meta:migration-transpile/ext:code-convert"
+  uses:
+    - "meta:migration-transpile/ext:deploy-switch"
+title: "Lakebridge Switch PySpark conversion"
+description: |
+  Runs Lakebridge/Switch legacy PySpark conversion when the Switch package and
+  required Unity Catalog Volume paths are configured; otherwise reports concrete
+  blockers without fabricating converted output. SQL transpilation belongs to
+  skill:migration.lakebridge-sql-transpile.
+
+when_to_use:
+  - "A usecase includes legacy PySpark application, notebook, or job code that should be converted"
+  - "The user asks for Lakebridge Switch PySpark conversion"
+  - "Migration evidence includes PySpark source directories rather than SQL statements"
+
+load_signal:
+  embed: "Lakebridge Switch convert legacy PySpark code to Databricks preflight"
+  triggers:
+    - "lakebridge switch"
+    - "pyspark convert"
+    - "legacy pyspark conversion"
+    - "databricks.labs.switch"
+
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools:
+    - "tool:uc.list_volumes"
+  skills:
+    - "skill:uc.catalog-introspect"
+  model_role: ""
+  budget:
+    max_context_tokens: 8000
+    max_total_input_tokens: 12000
+    max_total_output_tokens: 4000
+    max_tool_calls: 0
+    max_wallclock_sec: 120
+
+inputs:
+  - name: "source_path"
+    type: "string"
+    required: false
+    description: "Unity Catalog Volume path containing legacy PySpark source code"
+  - name: "output_path"
+    type: "string"
+    required: false
+    description: "Unity Catalog Volume path where converted artifacts should be written"
+  - name: "source_technology"
+    type: "string"
+    required: false
+  - name: "target_technology"
+    type: "string"
+    required: false
+  - name: "model_endpoint"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "code_convert_preflight"
+    type: "CodeConvertPreflight"
+  - name: "switch_run"
+    type: "SwitchCliRun"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  scorers:
+    - "PreflightCompleteness"
+
+constitutional:
+  - "code.conversion.must.not.fabricate.outputs"
+  - "switch.orchestration.must.be.separate.from.sql.transpile"
+  - "blocked.state.must.explain.missing.bindings"
+  - "pyspark.code.convert.paths.must.use.uc.volumes"
+
+execution:
+  runtime: "local_preflight"
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-migration-lakebridge-code-convert"

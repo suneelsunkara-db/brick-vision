@@ -1,0 +1,121 @@
+schema_version: "1.0"
+id: "skill:harness.workspace-claim-emitter"
+version: "0.1.0"
+exemplar_of: "meta:agent-frameworks/ext:emit-workspace-claims-to-kg"  # v0.7.7 — parent extension in <bv>.capability_graph
+capability_links:
+  primary:
+    - "meta:agent-frameworks/ext:emit-workspace-claims-to-kg"  # v0.7.7 — parent extension in <bv>.capability_graph"
+  uses: []
+title: "Continuously refresh Workspace KG via scheduled introspection"
+description: |
+  Meta-skill. Orchestrates the v0.6 introspection skills on a schedule:
+    1. uc.catalog-introspect            (full sweep nightly, delta-aware where possible)
+    2. delta.table-introspect           (per-table refresh on changed tables only)
+    3. uc.grant-introspect              (full sweep nightly)
+    4. lineage.introspect (metastore_sweep) (incremental, last_seen-watermark)
+
+  Computes per-source freshness Claims so other skills can decide when to trust
+  the KG vs. when to trigger an on-demand refresh. Surfaces ingestion failures
+  as Questions on the source rather than as silent gaps.
+
+  This skill is what makes the harness's KG self-evolving in operational terms.
+
+when_to_use:
+  - "Scheduled nightly run (default 02:00 workspace local time)"
+  - "On-demand refresh requested by another skill that found stale Beliefs"
+  - "After known schema migration or large ingestion event"
+
+load_signal:
+  embed: "Refresh workspace knowledge graph nightly bootstrap claims emitter"
+  triggers:
+    - "refresh kg"
+    - "rebootstrap workspace"
+    - "kg freshness"
+
+requires:
+  uc_permissions:
+    - "USE METASTORE"
+    - "USE CATALOG on every catalog in scope"
+    - "SELECT on system.information_schema.* and system.access.*"
+  system_schemas:
+    - "system.information_schema"
+    - "system.access"
+    - "system.storage"
+  tools:
+    - "tool:harness.invoke_skill"
+    - "tool:harness.compute_changed_tables"
+    - "tool:kg.emit_claims"
+    - "tool:kg.upsert_freshness_belief"
+  skills:
+    - "skill:uc.catalog-introspect@>=0.1"
+    - "skill:delta.table-introspect@>=0.1"
+    - "skill:uc.grant-introspect@>=0.1"
+    - "skill:lineage.introspect@>=0.1"
+  model_role: null
+  budget:
+    # Mechanical skill — model_role is null, so max_context_tokens / max_total_*_tokens omitted (v0.7.1 schema)
+    max_tool_calls: 5000
+    max_wallclock_sec: 7200          # 2h cap for very large workspaces
+
+inputs:
+  - name: "mode"
+    type: "string"
+    required: false
+    default: "incremental"
+    enum: ["full", "incremental", "smoke"]
+  - name: "catalog_filter"
+    type: "string"
+    required: false
+
+outputs:
+  - name: "summary"
+    type: "object"
+    schema:
+      mode: "string"
+      catalogs_processed: "integer"
+      schemas_processed: "integer"
+      tables_introspected: "integer"
+      grants_refreshed: "integer"
+      lineage_edges_emitted: "integer"
+      claims_emitted_total: "integer"
+      questions_emitted: "integer"      # per-source ingestion failures
+      duration_ms: "integer"
+      per_source_freshness:
+        - source: "string"
+          last_success_at: "timestamp"
+          claims_in_run: "integer"
+          status: "string"               # OK / DEGRADED / FAILED
+  - name: "claims"
+    type: "claims[]"
+    description: |
+      Emitted Claim shapes:
+        (source:uc.catalog-introspect, LAST_RUN_AT, timestamp, {claims_emitted, status})
+        (source:delta.table-introspect, LAST_RUN_AT, timestamp, ...)
+        (source:uc.grant-introspect, LAST_RUN_AT, timestamp, ...)
+        (source:lineage.introspect, LAST_RUN_AT, timestamp, ...)
+        (workspace, KG_FRESHNESS_AT, timestamp)
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.workspace_emitter_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "FreshnessBeliefMonotonicity"   # custom: every successful run advances LAST_RUN_AT
+    - "QuestionEmissionOnFailure"     # custom: a failed sub-skill produces a Question, not a silent skip
+
+constitutional:
+  - "no.write.to.uc"
+  - "must.emit.question.on.partial.failure"
+  - "must.respect.budget.caps.per.skill"
+
+execution:
+  runtime: "serverless"
+  schedule:
+    cron: "0 2 * * *"                # daily at 02:00 workspace TZ
+    timezone: "UTC"
+    catch_up: false
+  on_failure: "emit_question"
+
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-harness-emitter"

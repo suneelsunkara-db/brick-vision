@@ -1,0 +1,31 @@
+schema_version: "1.0"
+kind: workspace_profile
+
+id: partner-dev
+partner_id: local-partner
+display_name: Local partner development workspace
+
+workspace:
+  host: ${DATABRICKS_HOST}
+  workspace_id: null
+  cloud: aws
+  region: unknown
+
+auth:
+  mode: existing_databricks_env
+
+scope:
+  read_only: true
+  allowed_catalogs:
+    - partner_demo_catalog
+  blocked_catalogs:
+    - system
+
+kg:
+  enabled: true
+  introspection:
+    include_system: false
+    include_catalogs: true
+    include_lineage: false
+    include_jobs: false
+    include_models: false

@@ -1,0 +1,69 @@
+schema_version: "1.0"
+id: "skill:lakeflow.jobs-run-submit"
+version: "0.1.0"
+exemplar_of: "meta:lakeflow-jobs/ext:jobs-runs-submit"
+capability_links:
+  primary:
+    - "meta:lakeflow-jobs/ext:jobs-runs-submit"
+  uses: []
+title: "Bind a Databricks Jobs runs/submit API operation"
+description: |
+  Mechanical Skill Builder gate for Databricks Jobs API submit-run operations.
+  It validates that a Jobs runs/submit request is grounded in capability-graph
+  evidence and has a concrete request body. It does not execute the job.
+
+when_to_use:
+  - "A downstream skill needs a Databricks Jobs run submitted through the Jobs API"
+  - "The job request body has been generated or approved and must be bound to API evidence"
+  - "A reusable Jobs submit operation is needed before an execution adapter runs"
+load_signal:
+  embed: "Databricks Jobs Lakeflow runs submit API job_submit_body task spark_python_task"
+  triggers:
+    - "jobs runs submit"
+    - "submit databricks job"
+    - "jobs api"
+    - "job submit body"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills: []
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "capability_evidence"
+    type: "object[]"
+    required: true
+    description: "Capability Graph evidence with indexed Jobs API refs"
+  - name: "job_submit_body"
+    type: "object"
+    required: true
+    description: "Fully bound Databricks Jobs runs/submit request body"
+  - name: "job_submit_operation"
+    type: "object"
+    required: false
+    description: "Optional Jobs submit operation metadata"
+outputs:
+  - name: "api_operation"
+    type: "object"
+  - name: "capability_refs"
+    type: "string[]"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.lakeflow_jobs_run_submit_v0_1"
+  scorers:
+    - "JobsSubmitGroundedInCapabilityGraph"
+    - "JobsSubmitBodyBound"
+constitutional:
+  - "api.operations.must.cite.capability-graph"
+  - "mutating.api.requests.must.have.bound-body"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-lakeflow-jobs-run-submit"

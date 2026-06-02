@@ -1,0 +1,10 @@
+{
+  "_doc": "Sample dry-run fixture for `build_vs_grants_probe` per N180 BULK. Loaded when `BV_DRY_RUN=true`. Override the path via `BV_DRY_RUN_PREFLIGHT_VS_GRANTS_PATH`.",
+  "endpoint_exists": true,
+  "index_grants": {
+    "entity_index": {
+      "bv_indexer_sp": ["WRITE"],
+      "bv_app_sp": ["READ"]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "_doc": "Canned per-query smoke hits used when BV_FAKE_LLM=true short-circuits capability_graph.smoke. Each row maps a SmokeBaselineRow.query_id to a ranked list of extension_ids; run_smoke uses ranked[0] as the observed top-1. When a baseline query_id is not present here, run_smoke falls back to the row's expected_top_1_extension_id (i.e., the offline harness passes by construction). Replace these with empirically calibrated rankings as the v0.7.7 baseline lands.",
+  "fixture_version": "v0.7.7-cascade",
+  "hits": []
+}

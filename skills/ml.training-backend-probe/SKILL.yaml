@@ -1,0 +1,75 @@
+schema_version: "1.0"
+id: "skill:ml.training-backend-probe"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:databricks-ml-training-backend-probe"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:databricks-ml-training-backend-probe"
+  uses: []
+title: "Probe Databricks runtime support for ML training backends"
+description: |
+  Mechanical Skill Builder gate that prepares a non-training Databricks Jobs
+  probe and normalizes its output into runtime evidence for backend selection.
+  It does not train models and does not choose a backend.
+
+when_to_use:
+  - "Backend selection needs observed runtime evidence"
+  - "A Databricks Jobs runtime must prove AutoML, Spark ML, MLflow UC, or Mosaic AI availability"
+  - "Training must not rely on manually asserted runtime support flags"
+load_signal:
+  embed: "probe Databricks runtime AutoML Spark ML MLflow UC Mosaic AI serverless Jobs"
+  triggers:
+    - "ml backend probe"
+    - "runtime evidence"
+    - "probe automl"
+    - "probe spark ml"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:lakeflow.jobs-run-submit"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "probe_driver_uri"
+    type: "string"
+    required: false
+  - name: "probe_output_table"
+    type: "string"
+    required: false
+  - name: "probe_id"
+    type: "string"
+    required: false
+  - name: "runtime_surface"
+    type: "string"
+    required: true
+  - name: "probe_result"
+    type: "object"
+    required: false
+    description: "Observed row emitted by the backend probe driver"
+outputs:
+  - name: "job_submit_body"
+    type: "object"
+  - name: "runtime_evidence"
+    type: "object"
+    description: "Observed backend booleans plus substrate evidence such as Python imports, data movement, and MLflow primitives"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_training_backend_probe_v0_1"
+  scorers:
+    - "ProbeDoesNotTrain"
+    - "RuntimeEvidenceDerivedFromProbe"
+constitutional:
+  - "backend.probe.must.not-train"
+  - "runtime.evidence.must.be-observed"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-training-backend-probe"

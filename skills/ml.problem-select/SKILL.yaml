@@ -1,0 +1,73 @@
+schema_version: "1.0"
+id: "skill:ml.problem-select"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:select-modeling-strategy"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:select-modeling-strategy"
+  uses: []
+title: "Select the right ML problem type for a usecase and dataset"
+description: |
+  Mechanical Skill Builder gate that reviews business intent and dataset
+  profiles before any training skill runs. It decides whether the evidence
+  supports classification, regression, ranking/recommendation, forecasting,
+  segmentation, anomaly detection, text/GenAI, or no-ML yet.
+
+  This skill is deliberately dataset-agnostic. It produces a model strategy
+  recommendation and evidence gaps; it does not train or register a model.
+when_to_use:
+  - "A proposed usecase asks for ML, prediction, recommendation, forecasting, segmentation, or anomaly detection"
+  - "A dataset has features but no approved modeling objective yet"
+  - "BrickVision must decide whether ML is justified before training"
+load_signal:
+  embed: "ML problem selection classification regression ranking recommendation forecasting segmentation anomaly no-ML"
+  triggers:
+    - "choose model"
+    - "ml strategy"
+    - "recommendation model"
+    - "forecast"
+    - "classification"
+    - "regression"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills: []
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "usecase_title"
+    type: "string"
+    required: true
+  - name: "business_objective"
+    type: "string"
+    required: true
+  - name: "dataset_profiles"
+    type: "object[]"
+    required: true
+    description: "Table profiles with table_ref, row_count, and columns[{name,data_type,distinct_count,null_count}]"
+  - name: "candidate_target"
+    type: "string"
+    required: false
+outputs:
+  - name: "problem_selection"
+    type: "MlProblemSelection"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_problem_select_v0_1"
+  scorers:
+    - "MlProblemTypeFit"
+    - "NoMLWhenLabelMissing"
+constitutional:
+  - "training.must.not.run.before.problem.selection"
+  - "model.strategy.must.be.evidence-backed"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-problem-select"

@@ -1,0 +1,9 @@
+{
+  "_doc": "Sample dry-run fixture for `build_indexer_sp_probe` per N180 BULK. Loaded when `BV_DRY_RUN=true`. Override the path via `BV_DRY_RUN_PREFLIGHT_INDEXER_SP_PATH`. Modelled on the SCIM ServicePrincipals API response shape.",
+  "indexer_sp_application_id": "00000000-0000-0000-0000-000000000001",
+  "app_sp_application_id": "00000000-0000-0000-0000-000000000002",
+  "enabled": {
+    "bv_indexer_sp": true,
+    "bv_app_sp": true
+  }
+}

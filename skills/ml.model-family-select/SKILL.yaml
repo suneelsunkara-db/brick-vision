@@ -1,0 +1,72 @@
+schema_version: "1.0"
+id: "skill:ml.model-family-select"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:ml-model-family-select"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:ml-model-family-select"
+  uses: []
+title: "Select ML model family from approved problem and feature evidence"
+description: |
+  Mechanical Skill Builder gate that chooses the model family after problem
+  selection, feature readiness, and strategy planning. It does not choose a
+  runtime backend and does not train a model. It declares the substrate a model
+  family requires so backend selection can prove compatibility from observed
+  runtime evidence.
+when_to_use:
+  - "A usecase has an approved ML problem type and needs a model family before backend selection"
+  - "Regression, classification, forecasting, clustering, ranking, anomaly, or GenAI families must be separated from runtime backend choice"
+  - "Backend selection must map model family requirements to observed serverless substrate evidence"
+load_signal:
+  embed: "ML model family select regression classification forecasting ranking clustering anomaly serverless substrate"
+  triggers:
+    - "model family"
+    - "classification model"
+    - "regression model"
+    - "forecasting model"
+    - "backend mapping"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.problem-select"
+    - "skill:ml.feature-readiness"
+    - "skill:ml.strategy-plan"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "strategy_plan"
+    type: "object"
+    required: true
+  - name: "feature_readiness"
+    type: "object"
+    required: true
+  - name: "dataset_profiles"
+    type: "object[]"
+    required: true
+outputs:
+  - name: "selected_model_family"
+    type: "object"
+  - name: "candidate_model_families"
+    type: "object[]"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_model_family_select_v0_1"
+  scorers:
+    - "ModelFamilyMatchesProblemAndFeatureEvidence"
+    - "ModelFamilyDoesNotSelectBackend"
+constitutional:
+  - "model.family.must.follow-problem-and-feature-evidence"
+  - "model.family.must.not-select-runtime-backend"
+  - "training.must.not-run-before-model-family-selection"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-model-family-select"

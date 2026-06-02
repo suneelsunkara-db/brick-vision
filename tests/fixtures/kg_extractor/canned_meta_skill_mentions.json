@@ -1,0 +1,5 @@
+{
+  "_doc": "Canned blog-chunk -> meta-skill mention map used by capability_graph.graph_builder._build_from_blog when BV_FAKE_LLM=true. Keys are BlogChunkEntity.chunk_id values; each value is a list of {meta_skill_id, confidence, rationale} rows. Entries whose meta_skill_id isn't in the active taxonomy are silently dropped. The default fixture is empty so the offline harness yields an unlinked-chunks snapshot — replace with empirically calibrated mappings as the v0.7.7 baseline lands.",
+  "fixture_version": "v0.7.7-cascade",
+  "mentions": {}
+}

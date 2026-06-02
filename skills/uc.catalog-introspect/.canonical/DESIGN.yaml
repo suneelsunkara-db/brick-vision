@@ -1,0 +1,116 @@
+schema_version: "1.0"
+kind: "skill"
+id: "skill:uc.catalog-introspect"
+version: "0.1.0"
+title: "Introspect Unity Catalog structure"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-catalog-introspect"
+
+exemplar_of: "meta:unity-catalog-foundation/ext:introspect-catalog-tree"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "mechanical_dag"
+  dag:
+    - id: "list_catalogs"
+      tool: "tool:uc.list_catalogs"
+      inputs:
+        filter_pattern: "{catalog_filter}"
+        include_system: "{include_system}"
+    - id: "list_schemas"
+      tool: "tool:uc.list_schemas"
+      for_each: "list_catalogs.results"
+      inputs:
+        catalog_name: "$list_catalogs.catalog_name"
+    - id: "list_tables"
+      tool: "tool:uc.list_tables"
+      for_each: "list_schemas.results"
+      inputs:
+        catalog_name: "$list_schemas.catalog_name"
+        schema_name: "$list_schemas.schema_name"
+    - id: "list_views"
+      tool: "tool:uc.list_views"
+      for_each: "list_schemas.results"
+      inputs:
+        catalog_name: "$list_schemas.catalog_name"
+        schema_name: "$list_schemas.schema_name"
+    - id: "list_volumes"
+      tool: "tool:uc.list_volumes"
+      for_each: "list_schemas.results"
+      inputs:
+        catalog_name: "$list_schemas.catalog_name"
+        schema_name: "$list_schemas.schema_name"
+    - id: "list_functions"
+      tool: "tool:uc.list_functions"
+      for_each: "list_schemas.results"
+      inputs:
+        catalog_name: "$list_schemas.catalog_name"
+        schema_name: "$list_schemas.schema_name"
+    - id: "build_claims"
+      kind: "pure_python"
+      function: "build_uc_introspect_claims"
+      inputs:
+        catalogs: "$list_catalogs.results"
+        schemas: "$list_schemas.results"
+        tables: "$list_tables.results"
+        views: "$list_views.results"
+        volumes: "$list_volumes.results"
+        functions: "$list_functions.results"
+    - id: "emit_claims"
+      tool: "tool:kg.emit_claims"
+      inputs:
+        claims: "$build_claims.claims"
+
+requires:
+  uc_permissions:
+    - "USE CATALOG on each target catalog"
+    - "USE SCHEMA on each target schema"
+    - "BROWSE on each target catalog"
+    - "SELECT on system.information_schema.* (enabled per metastore)"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_catalogs"
+    - "tool:uc.list_schemas"
+    - "tool:uc.list_tables"
+    - "tool:uc.list_views"
+    - "tool:uc.list_volumes"
+    - "tool:uc.list_functions"
+    - "tool:kg.emit_claims"
+  skills: []
+  model_role: null
+  budget:
+    max_tool_calls: 200
+    max_wallclock_sec: 600
+  constitutional:
+    - "no.write.to.uc"
+    - "no.cross.workspace.read"
+    - "respect.user.obo.if.requested"
+
+inputs:
+  - name: "catalog_filter"
+    type: "string"
+    required: false
+    description: "Optional LIKE-pattern to limit enumeration to one catalog"
+  - name: "include_system"
+    type: "boolean"
+    required: false
+    default: false
+    description: "Whether to introspect the system catalog itself"
+
+outputs:
+  - name: "summary"
+    type: "object"
+  - name: "claims"
+    type: "claims[]"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.uc_catalog_introspect_v0_1"
+  scorers:
+    - "ClaimCountAssertion"
+    - "ClaimShapeValidator"
+    - "Idempotence"
+
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"

@@ -1,0 +1,88 @@
+schema_version: "1.0"
+kind: "skill"
+id: "skill:uc.catalog-bootstrap-design"
+version: "0.1.0"
+title: "Design a Unity Catalog bootstrap (catalog + schemas + initial grants)"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-uc-catalog-bootstrap"
+
+exemplar_of: "meta:unity-catalog-foundation/ext:bootstrap-catalog-design"  # v0.7.7 N175 - parent extension in <bv>.capability_graph (section 23.2.6)
+orchestration:
+  kind: "llm_with_tools"
+  model_role: "skill_runtime_premium"
+  max_turns: 8
+  system_prompt_sections:
+    - id: "role"
+      altitude: "high"
+      summary: "You design a UC catalog bootstrap (catalog + schemas + initial grants) given an organisational intent."
+    - id: "constraints"
+      altitude: "medium"
+      summary: |
+        Cite evidence claim_ids for every existing entity referenced.
+        Surface risk flags.
+        Never recommend metastore-admin or account-admin grants.
+    - id: "output_schema"
+      altitude: "low"
+      summary: "Emit `bootstrap_plan` matching the declared output schema, strict mode."
+  tool_pool:
+    - "tool:uc.list_catalogs"
+    - "tool:uc.list_schemas"
+    - "tool:kg.query_beliefs"
+  behavior_constraints:
+    must_emit_evidence_chain: true
+    must_surface_risk_flags: true
+    no_recommend_metastore_admin: true
+    no_recommend_account_admin: true
+
+requires:
+  uc_permissions:
+    - "USE METASTORE"
+    - "SELECT on system.information_schema.*"
+  system_schemas:
+    - "system.information_schema"
+  tools:
+    - "tool:uc.list_catalogs"
+    - "tool:uc.list_schemas"
+    - "tool:kg.query_beliefs"
+  skills:
+    - "skill:uc.catalog-introspect@>=0.1"
+  model_role: "skill_runtime_premium"
+  budget:
+    max_context_tokens: 24000
+    max_total_input_tokens: 42000
+    max_total_output_tokens: 8000
+    max_tool_calls: 20
+    max_wallclock_sec: 60
+  constitutional:
+    - "no.write.to.uc"
+    - "must.emit.evidence.chain"
+
+inputs:
+  - name: "intent"
+    type: "string"
+    required: true
+  - name: "scope_constraints"
+    type: "object"
+    required: false
+
+outputs:
+  - name: "bootstrap_plan"
+    type: "object"
+
+eval:
+  suite: "evals/"
+  required_pass_rate: 0.85
+  golden_dataset: "uc:brickvision.evals.uc_catalog_bootstrap_v0_1"
+  scorers:
+    - "Correctness"
+    - "Guidelines:must-cite-evidence"
+    - "Guidelines:no-fabricated-securables"
+    - "RetrievalGroundedness"
+    - "Safety"
+
+execution:
+  runtime: "serverless"
+  human_in_the_loop:
+    required: true
+    suggested_approver_group: "group:uc-admins"
+    approval_ttl_minutes: 60

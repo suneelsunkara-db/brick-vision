@@ -1,0 +1,121 @@
+schema_version: "1.0"
+id: "skill:ml.training-artifact-plan"
+version: "0.1.0"
+exemplar_of: "meta:mlflow-tracking/ext:databricks-ml-training-artifact-plan"
+capability_links:
+  primary:
+    - "meta:mlflow-tracking/ext:databricks-ml-training-artifact-plan"
+  uses: []
+title: "Plan a Databricks-native ML training artifact"
+description: |
+  Mechanical Skill Builder gate that turns an approved ML strategy, selected
+  model family, and selected Databricks backend into an artifact contract.
+  This skill does not train a model and does not execute Databricks APIs. It
+  selects a Databricks-native artifact template, validates required parameters,
+  and emits the task parameters/dependencies consumed by skill:ml.training-task-plan.
+
+  The artifact itself can be a generated or approved Databricks notebook/script,
+  AutoML-generated notebook, Spark ML pipeline, or project bundle entrypoint.
+  BrickVision runtime must not embed the model algorithm implementation.
+when_to_use:
+  - "ML backend selection is ready and a concrete training artifact must be bound"
+  - "The runtime should submit Databricks artifacts without owning model code"
+  - "A Skill Builder flow needs task parameters and audit contract for ML training"
+load_signal:
+  embed: "ML training artifact plan Databricks notebook script AutoML Spark ML MLflow Unity Catalog"
+  triggers:
+    - "training artifact"
+    - "ml artifact plan"
+    - "databricks native training"
+    - "model training template"
+requires:
+  uc_permissions: []
+  system_schemas: []
+  tools: []
+  skills:
+    - "skill:ml.strategy-plan"
+    - "skill:ml.model-family-select"
+    - "skill:ml.training-backend-select"
+  model_role: null
+  budget:
+    max_tool_calls: 0
+    max_wallclock_sec: 60
+inputs:
+  - name: "strategy_plan"
+    type: "object"
+    required: true
+  - name: "model_family"
+    type: "object"
+    required: true
+  - name: "backend_selection"
+    type: "object"
+    required: true
+  - name: "rows_uri"
+    type: "string"
+    required: true
+  - name: "model_full_name"
+    type: "string"
+    required: true
+  - name: "feature_columns"
+    type: "string[]"
+    required: true
+  - name: "label_column"
+    type: "string"
+    required: true
+  - name: "primary_key"
+    type: "string"
+    required: true
+  - name: "val_metric_name"
+    type: "string"
+    required: true
+  - name: "val_metric_floor"
+    type: "number"
+    required: true
+  - name: "split_seed"
+    type: "integer"
+    required: true
+  - name: "strategy_approval_id"
+    type: "string"
+    required: true
+  - name: "audit_table"
+    type: "string"
+    required: true
+  - name: "audit_id"
+    type: "string"
+    required: false
+  - name: "training_artifact_uri"
+    type: "string"
+    required: true
+    description: "Workspace/Volumes/DBFS URI of generated or approved Databricks training artifact"
+  - name: "artifact_template_id"
+    type: "string"
+    required: false
+outputs:
+  - name: "artifact_contract"
+    type: "object"
+  - name: "training_artifact_uri"
+    type: "string"
+  - name: "task_parameters"
+    type: "string[]"
+  - name: "environment_dependencies"
+    type: "string[]"
+  - name: "template_source"
+    type: "string"
+  - name: "findings"
+    type: "findings[]"
+eval:
+  suite: "evals/"
+  required_pass_rate: 1.00
+  golden_dataset: "uc:brickvision.evals.ml_training_artifact_plan_v0_1"
+  scorers:
+    - "NoRuntimeEmbeddedModelCode"
+    - "ArtifactContractDeclared"
+constitutional:
+  - "training.artifact.must-be-databricks-native"
+  - "runtime.adapters.must-not-embed-training-code"
+  - "artifact.template.must-declare-audit-contract"
+execution:
+  runtime: "serverless"
+  on_failure: "emit_question"
+owner: "team:platform-foundations"
+signing_key_id: "uc:secrets:bv/skill-ml-training-artifact-plan"
