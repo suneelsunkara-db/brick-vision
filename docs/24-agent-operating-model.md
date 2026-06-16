@@ -39,6 +39,14 @@ BrickVision agents need a shared, structured context they can reason over togeth
 3. **Reasoning Memory** — why decisions were made:
    - decision traces, rejected alternatives, policy checks, reviewer findings, trust promotions, and blocked/retry reasons.
 
+"Shared" does not mean one global blob every agent sees. It means that, within a given graph, multiple producers — collaborating agents, the human reviewer, and the UI — read and write the same live state. The graph is shared at three scopes, one per memory layer:
+
+- **Long-Term Memory is workspace-wide and durable.** The Capability Graph, Skill Knowledge Graph, and Workspace Context Graph are read by every agent, usecase, and build. This is the broadest scope.
+- **Shared Working Memory is per-run.** Each active run (a Skill Build Run, a usecase execution) has its own `graph_id`. The agents on that run, the reviewer, and the UI collaborate on that run's working state in real time. This is the "shared among collaborating agents" scope.
+- **Reasoning Memory is per-run, retained.** Decision traces for a run are shared with reviewers and future builds so rejected alternatives and policy findings survive.
+
+The same substrate (events → projections → lenses) serves all three scopes; only the `graph_id` scoping differs (e.g. `graph_id=skill_build:sbr_...`, `graph_id=outcome_exec:...`, or a long-term graph id). The first implementation wires one per-run graph (a Skill Build) end-to-end; the skill-building agents are the first producers, not the boundary of the concept.
+
 The Shared Context Graph is state-managed as an append-only event ledger plus materialized current graph views. Old events are not mutated. Agents append context events; projections materialize current nodes/edges; UIs consume scoped views rather than rendering the full graph.
 
 Canonical event fields include:
@@ -67,6 +75,17 @@ Storage decisions:
 - **Approved partner skills live in `repo:/skill-packs/<partner>/<skill_name>/`** or the signed packaged equivalent. UC Volumes may stage drafts but must not become the canonical approved skill source.
 - **Vector Search indexes selected summaries**, such as skill descriptions, evidence-pack summaries, decision summaries, review findings, and artifact summaries. It must not embed every raw event.
 - **UC Delta is optional archive/export/offline analytics**, not the live Shared Context Graph store.
+
+**Skill body vs. skill state — the hard storage line.** Lakebase never stores skill source code. A skill's executable body and its lifecycle/graph state are different things and live in different places:
+
+| Thing | Where it lives | Why |
+|---|---|---|
+| Approved skill body (`SKILL.yaml`, `skill.py`, tests) | Git: core in `repo:/skills/<name>/`, partner in `repo:/skill-packs/<partner>/<name>/` | Executable contracts must be code-reviewed, signed, and replayable from content hashes — never a mutable DB row. |
+| Draft/in-progress skill artifacts (build outputs, logs, review reports, evidence packs) | UC Volumes | Large, transient, not yet trusted; staging area only. |
+| Skill lifecycle + graph state (Skill Requests, Build Runs, task/review status, context events, node/edge projections, trust level, and **pointers** to the Git path or Volume path) | Lakebase | Live, queryable, real-time UI reads. |
+| Curated summaries (skill descriptions for retrieval) | Vector Search | Semantic match during planning; not the source of truth. |
+
+A skill becomes executable only when its file is reviewed/signed in Git, not when a Lakebase row flips. When an agent needs the actual body, it dereferences the Lakebase pointer to Git or the Volume. This keeps the trust boundary non-circular: Lakebase holds metadata and references, files hold code.
 
 Visibility rule: the Console must not default to a raw node/edge hairball. It should expose context through lenses: memory layer summary, Skill Build vertical workflow, selected-node context panel, decision trace view, artifact view, review/test view, and event timeline.
 
@@ -275,14 +294,16 @@ The Evaluation page is mandatory because "evaluate" is not the same as "observe.
 │  For each SkillInvocation in plan (topological order):                   │
 │    1. Resolve inputs (from prior outputs, user-provided, or KG)          │
 │    2. Check `requires` (permissions, tools, budget remaining)            │
-│    3. If `model_role != null`: call LLM with constitutional constraints  │
+│    3. If `model_role != null`: call worker agent with constitutional       │
+│       constraints through the tool-based harness (§24.7.A)                │
 │       - System prompt includes: skill description + grounding evidence   │
 │         from Capability Graph + input schemas + output schemas           │
 │       - Constitutional rules enforced as hard filters on output          │
 │    4. If `model_role == null` (mechanical): execute tool calls directly  │
-│    5. Validate output schema matches `outputs` declaration              │
-│    6. On failure: apply `execution.on_failure` policy                    │
-│    7. Emit: SkillExecutionResult (typed audit row)                       │
+│    5. Verifier agent checks worker/tool output before promotion           │
+│    6. Validate output schema matches `outputs` declaration              │
+│    7. On failure: apply `execution.on_failure` policy                    │
+│    8. Emit: SkillExecutionResult (typed audit row)                       │
 │                                                                          │
 │  OUTPUT: GenerationResult {                                              │
 │    artifacts: [SkillExecutionResult], budget_consumed, failures          │

@@ -40,3 +40,4 @@ proof-artifacts/
 proof-artifacts/**/runs/
 proof-artifacts/**/tmp/
 proof-artifacts/**/.tmp/
+.env.example

@@ -8,6 +8,29 @@
 
 ## §20. Changelog
 
+- **v0.7.9 (proposed) — Shared Context Layer implementation plan + design clarifications.**
+
+  **New doc:** [`26-shared-context-layer-implementation.md`](./26-shared-context-layer-implementation.md)
+  is the concrete build plan for the Shared Context Graph: event-sourced Lakebase
+  schema (append-only `shared_context_events` + materialized
+  `nodes_current`/`edges_current` projections), a writable/transactional Lakebase
+  path (the app currently only reads `*_synced` tables), a
+  `shared_context_service` behind an in-memory/Lakebase store interface, an SSE
+  read/stream API with `sequence_no` + `Last-Event-ID` resume, and a reactive UI
+  (TanStack Query snapshot + SSE reducer + Zustand lenses) using only existing
+  `apps/console` dependencies.
+
+  **Design clarifications locked in §24.0.A:** "shared" means collaboration
+  within a graph at three scopes (Long-Term workspace-wide, Shared Working
+  per-run, Reasoning per-run), not one global blob; and the hard storage line —
+  skill source bodies live in Git/UC Volumes while Lakebase stores only
+  lifecycle/graph state plus pointers (Lakebase never stores skill code).
+
+  **Robustness model:** the event log is the source of truth; the graph is a
+  rebuildable projection; in-memory copies are disposable read snapshots; event
+  insert + projection update are one transaction; idempotency keys give
+  exactly-once; contradictions become conflict events.
+
 - **v0.7.9 (proposed) — Context Intelligence Layer added.**
 
   **Decision:** Context Intelligence is the differentiating layer above Shared
